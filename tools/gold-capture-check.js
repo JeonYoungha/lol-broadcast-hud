@@ -1,0 +1,6 @@
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');const c={window:{}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/gold-capture-core.js'),'utf8'),c);const gold=c.window.GoldCaptureCore;
+assert.equal(gold.seconds('29:00'),1740);assert.equal(gold.seconds('1:59'),119);assert.equal(gold.seconds('29:99'),0);assert.equal(gold.seconds('abc'),0);
+const data={duration:1800,points:Array.from({length:31},(_,i)=>({seconds:i*60,diff:(i-15)*200}))};assert(gold.valid(data));assert(!gold.valid({duration:0,points:data.points}));assert(!gold.valid({duration:1800,points:[]}));assert(!gold.valid({...data,points:[...data.points,{seconds:NaN,diff:4}]}));
+const preview=gold.preview(data);assert(preview.includes('<svg'));assert(preview.includes('30:00'));assert(!/NaN|Infinity/.test(preview));data.invert=true;assert(gold.preview(data).includes('-3.00K'));
+const capture=fs.readFileSync(path.join(__dirname,'../public/result-capture.js'),'utf8');assert(capture.includes('preview:true,graphType,durationSeconds'));assert(capture.includes('goldImage:pending.url,goldData:data'));assert(capture.includes('if(graphType===\'gold\')'));assert(capture.includes('최소 2개'));
+console.log('PASS gold capture: time parsing, data validation, native preview, invert, explicit preview-only analysis and apply');

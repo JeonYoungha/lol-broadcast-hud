@@ -1,0 +1,16 @@
+.pick img{object-position:center top}
+.draft-side .pick.empty{border-bottom-color:rgba(255,255,255,.08)}
+.draft-side .pick-role{font-size:20px;line-height:1.2;letter-spacing:.04em}
+.draft-topbar{padding-bottom:8px}
+.draft-topbar .event-center{flex-direction:column;gap:3px;padding:5px 12px}
+.draft-topbar .event-logo{width:160px;height:64px;flex-shrink:0}
+.draft-topbar .event-name{font-size:13px;line-height:16px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.draft-topbar .event-meta{font-size:10px;line-height:14px;margin-top:0;white-space:nowrap}
+.draft-countdown{position:absolute;left:0;right:0;bottom:0;height:8px;background:#000;overflow:hidden;pointer-events:none;--timer-progress:0}
+.draft-countdown i{position:absolute;top:0;bottom:0;width:50%;transform:scaleX(var(--timer-progress));transition:transform 50ms linear}
+.draft-countdown .timer-blue{left:0;background:var(--blue);transform-origin:right center}
+.draft-countdown .timer-red{right:0;background:var(--red);transform-origin:left center}
+.ban img{filter:none;opacity:1}
+.ban:after{display:none}
+.ban.empty.waiting{animation:ban-wait 1.5s ease-in-out infinite}
+@keyframes ban-wait{0%,100%{background:#000;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}50%{background:#243044;box-shadow:inset 0 0 0 1px rgba(255,255,255,.3)}}

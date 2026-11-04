@@ -1,0 +1,7 @@
+{
+  "name": "lol-broadcast-hud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local OBS tournament draft and in-game HUD",
+  "scripts": { "start": "node server.js" }
+}

@@ -1,0 +1,60 @@
+<!doctype html><html lang="ko" class="overlay-page"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Draft Overlay</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/draft-effects.css"><link rel="stylesheet" href="/draft-team.css"></head><body><main class="overlay" id="app"></main><script src="/common.js"></script><script src="/draft-preview.js"></script><script src="/draft-team.js"></script><script>
+const logo=(src,cls='logo')=>src?`<img class="${cls}" src="${HUD.escape(src)}">`:`<span class="${cls} empty" aria-hidden="true"></span>`;const teamHead=(t,side)=>`<div class="team-head ${side}" style="--team:${t.color}">${logo(t.logo)}<div class="team-copy"><div class="team-name">${HUD.escape(t.name)}</div><div class="team-short">${HUD.escape(t.short)}</div></div><div class="series-score">${t.score}</div></div>`;
+function side(s,side,justLocked){const t=s[side],p=Array.from({length:5},(_,i)=>s.draft[side+'Picks']?.[i]||{id:0});return `<section class="draft-side ${side}" style="--team:${t.color}">${p.map((x,i)=>{const empty=!x.id,preview=!empty&&x.locked===false,lockedNow=justLocked.has(`${side}:${i}`);return `<div class="pick ${empty?'empty':''} ${preview?'preview':''} ${lockedNow?'lock-in':''}">${empty?'':`<img src="${HUD.splash({...x,skinId:0,asset:''})}">`}<div class="pick-copy"><div class="pick-role">${HUD.escape(t.players?.[i]||'')}</div>${empty?'':`<div class="pick-name">${HUD.escape(x.name||'')}</div>`}</div></div>`}).join('')}</section>`}
+function bans(arr){return arr.map((id,i)=>`<div class="ban ${id?'':'empty'}" data-ban-index="${i}">${id?`<img src="${HUD.icon(id)}">`:''}</div>`).join('')}
+function updateBanWaiting(s){
+  let active=s.draft.activeBanSlots;
+  if(!active){active={blue:-1,red:-1};if(/BAN/i.test(s.draft.phase||'')){
+    const blue=(s.draft.blueBans||[]).filter(Boolean).length,red=(s.draft.redBans||[]).filter(Boolean).length;
+    const side=blue+red<6?(blue<=red?'blue':'red'):(red<=blue?'red':'blue');
+    active[side]=(s.draft[side+'Bans']||[]).findIndex(id=>!id);
+  }}
+  for(const side of ['blue','red'])app.querySelectorAll(`.bans.${side} .ban`).forEach(el=>el.classList.toggle('waiting',el.classList.contains('empty')&&Number(el.dataset.banIndex)===active[side]));
+}
+let lastLayout='';
+let previousLocks=new Map();
+let timerDeadline=0,timerDuration=0,lastServerTimer=null,lastTimerPhase='';
+function drawTimer(){
+  const timer=app.querySelector('.draft-countdown');if(!timer)return;
+  const left=timerDeadline?Math.max(0,(timerDeadline-performance.now())/1000):0;
+  const progress=timerDuration>0?Math.min(1,left/timerDuration):0;
+  timer.style.setProperty('--timer-progress',String(progress));
+  timer.setAttribute('aria-valuenow',String(Math.ceil(left)));
+  timer.setAttribute('aria-valuemax',String(timerDuration));
+}
+function syncTimer(seconds,phase){
+  const value=Math.max(0,Number(seconds)||0),now=performance.now();
+  const remaining=Math.max(0,(timerDeadline-now)/1000);
+  if(lastServerTimer===null||phase!==lastTimerPhase||value>remaining+1.5)timerDuration=value;
+  else timerDuration=Math.max(timerDuration,value);
+  if(lastServerTimer===null||phase!==lastTimerPhase||value!==lastServerTimer)timerDeadline=now+value*1000;
+  lastServerTimer=value;lastTimerPhase=phase||'';drawTimer();
+}
+setInterval(drawTimer,50);
+const visiblePicks=picks=>(picks||[]).map(p=>({id:p.id,name:p.id?p.name:'',locked:p.locked}));
+function renderDraft(s){
+  const nextLocks=new Map(),justLocked=new Set();
+  for(const sideName of ['blue','red'])(s.draft[sideName+'Picks']||[]).forEach((pick,i)=>{
+    const key=`${sideName}:${i}`,locked=pick.locked===true;
+    nextLocks.set(key,locked);
+    if(lastLayout&&locked&&!previousLocks.get(key))justLocked.add(key);
+  });
+  const layout=JSON.stringify({event:s.event,blue:s.blue,red:s.red,bluePicks:visiblePicks(s.draft.bluePicks),redPicks:visiblePicks(s.draft.redPicks),blueBans:s.draft.blueBans,redBans:s.draft.redBans,fearless:s.fearless?.games});
+  document.documentElement.style.setProperty('--blue',s.blue.color);
+  document.documentElement.style.setProperty('--red',s.red.color);
+  if(layout!==lastLayout){
+    lastLayout=layout;
+    app.innerHTML=`<header class="topbar draft-topbar">${teamHead(s.blue,'blue')}<div class="event-center">${logo(s.event.logo,'event-logo')}<div class="event-name">${HUD.escape(s.event.name)}</div><div class="event-meta">${HUD.escape(s.event.round)} · GAME ${s.event.game} · BO${s.event.bestOf}</div></div>${teamHead(s.red,'red')}<div class="draft-countdown" role="progressbar" aria-label="밴픽 남은 시간" aria-valuemin="0"><i class="timer-blue"></i><i class="timer-red"></i></div></header>${side(s,'blue',justLocked)}<div class="draft-stage"><div class="phase-pill"><div class="phase-label">CHAMPION SELECT</div><div class="phase-time"></div></div></div>${side(s,'red',justLocked)}<footer class="banbar"><div class="bans blue">${bans(s.draft.blueBans)}</div><div class="ban-center">BANS</div><div class="bans red">${bans(s.draft.redBans)}</div></footer>`;
+  }
+  let history=app.querySelector('.fearless-history');if(!history){history=document.createElement('div');history.className='fearless-history';app.append(history)}
+  const games=s.fearless?.games||[];const historyKey=JSON.stringify(games);if(history.dataset.key!==historyKey){history.dataset.key=historyKey;history.innerHTML=games.map((game,i)=>`<div class="fearless-row"><span>GAME ${i+1}</span>${game.picks.map(id=>`<img src="${HUD.icon(id)}" alt="" title="${HUD.escape(String(id))}">`).join('')}</div>`).join('')}
+  document.documentElement.style.setProperty('--fearless-rows',String(games.length));
+  previousLocks=nextLocks;
+  updateBanWaiting(s);
+  const phase=app.querySelector('.phase-time');if(phase)phase.textContent=s.draft.phase||'';
+  syncTimer(s.draft.timer,s.draft.phase);
+  DraftTeam.render(s);
+}
+if(new URLSearchParams(location.search).has('preview'))DraftPreview.start(renderDraft);
+else HUD.init(renderDraft);
+</script></body></html>

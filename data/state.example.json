@@ -1,0 +1,190 @@
+{
+  "event": {
+    "name": "TOURNAMENT",
+    "round": "MATCH 01",
+    "game": 1,
+    "bestOf": "5",
+    "logo": ""
+  },
+  "blue": {
+    "name": "BLUE TEAM",
+    "short": "BLUE",
+    "score": 0,
+    "color": "#0050d1",
+    "logo": "",
+    "players": [
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "red": {
+    "name": "RED TEAM",
+    "short": "RED",
+    "score": 0,
+    "color": "#ff4f6d",
+    "logo": "",
+    "players": [
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "draft": {
+    "phase": "WAITING FOR TEAMS",
+    "timer": 0,
+    "bluePicks": [
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      }
+    ],
+    "redPicks": [
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      },
+      {
+        "id": 0,
+        "name": "",
+        "skinId": 0,
+        "locked": false
+      }
+    ],
+    "blueBans": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "redBans": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "game": {
+    "clock": "00:00",
+    "blueKills": 0,
+    "redKills": 0,
+    "blueGold": "",
+    "redGold": "",
+    "blueTowers": 0,
+    "redTowers": 0,
+    "blueDragons": 0,
+    "redDragons": 0,
+    "blueBarons": 0,
+    "redBarons": 0,
+    "blueGrubs": 0,
+    "redGrubs": 0,
+    "blueHeralds": 0,
+    "redHeralds": 0,
+    "blueDragonTypes": [
+      "",
+      "",
+      ""
+    ],
+    "redDragonTypes": [],
+    "blueFeats": 0,
+    "redFeats": 0,
+    "blueQuest": false,
+    "redQuest": false,
+    "dragonRespawn": 0,
+    "baronRespawn": 0,
+    "showBottom": true,
+    "redRoleQuests": {
+      "mid": false,
+      "support": false,
+      "bot": false,
+      "top": false,
+      "jungle": false
+    },
+    "blueRoleQuests": {
+      "mid": false,
+      "support": false,
+      "bot": false,
+      "top": false,
+      "jungle": false
+    },
+    "manualDragons": true,
+    "nextDragonType": "",
+    "manualNextDragon": false,
+    "screenGoldOcr": false,
+    "goldOcrStatus": "화면 인식 대기 중",
+    "laneGoldDiffs": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "fontSizes": {
+      "goldDiff": 10,
+      "gold": 20,
+      "kills": 33,
+      "laneGold": 13,
+      "clock": 17,
+      "team": 20
+    },
+    "manualGrubs": false
+  },
+  "connection": {
+    "autoSync": false,
+    "leaguePath": "C:\\Riot Games\\League of Legends",
+    "status": "연결 대기",
+    "phase": "None"
+  }
+}
