@@ -84,7 +84,7 @@ window.ResultControls=(()=>{
    if(document.activeElement!==byId('resultWinner'))byId('resultWinner').value=result.winner||'';
    const preview=byId('resultImagePreview');preview.style.display=result.damageImage?'block':'none';if(result.damageImage&&preview.getAttribute('src')!==result.damageImage)preview.src=result.damageImage;
    for(const [key] of fields){const input=card.querySelector('[data-result-field="'+key+'"]');if(document.activeElement!==input)input.value=key==='blueKda'?ResultCore.kda(snapshot,'blue'):key==='redKda'?ResultCore.kda(snapshot,'red'):(snapshot.game[key]??'')}
-   if(!uploading&&Date.now()>noticeUntil)status(result.snapshot?'저장된 결과: '+snapshot.event.name+' · GAME '+snapshot.event.game+' · '+snapshot.game.clock+(result.damageImage?' · 딜량 이미지 적용됨':' · 딜량 이미지 대기'):'아직 결과가 저장되지 않았어요. 경기 종료 후 현재 경기 결과 저장을 눌러주세요.',false);
+   if(!uploading&&Date.now()>noticeUntil)status(result.snapshot?'저장된 결과: '+(s.event?.name ?? snapshot.event.name)+' · GAME '+(s.event?.game ?? snapshot.event.game)+' · '+snapshot.game.clock+(result.damageImage?' · 딜량 이미지 적용됨':' · 딜량 이미지 대기'):'아직 결과가 저장되지 않았어요. 경기 종료 후 현재 경기 결과 저장을 눌러주세요.',false);
  }
  return {render};
 })();
