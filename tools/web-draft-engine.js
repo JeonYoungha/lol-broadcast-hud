@@ -39,7 +39,11 @@ function createEngine(state,{now=Date.now,championName,championIds,random=Math.r
     const blueTeam=category==='side'?(selection==='blue'?rofsSide:other):(opponent==='blue'?other:rofsSide);
     const firstTeam=category==='pick'?(selection==='first'?rofsSide:other):(opponent==='first'?other:rofsSide);
     const firstSide=firstTeam===blueTeam?'blue':'red';
-    if(blueTeam==='red')[state.blue,state.red]=[state.red,state.blue];
+    if(blueTeam==='red'){
+      const blueColor=state.blue.color,redColor=state.red.color;
+      [state.blue,state.red]=[state.red,state.blue];
+      state.blue.color=blueColor;state.red.color=redColor;
+    }
     return firstSide;
   }
   function startSeries(options){
