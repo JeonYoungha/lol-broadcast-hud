@@ -2,6 +2,16 @@
 .draft-side .pick.empty{border-bottom-color:rgba(255,255,255,.08)}
 .draft-side .pick-role{font-size:20px;line-height:1.2;letter-spacing:.04em}
 .draft-topbar{padding-bottom:8px}
+.draft-topbar .team-head{display:grid;grid-template-columns:90px minmax(0,1fr) 100px;align-items:center;gap:0;padding:0 16px;text-align:center}
+.draft-topbar .team-head.red{grid-template-columns:100px minmax(0,1fr) 90px;text-align:center}
+.draft-topbar .team-head .logo{grid-column:1;grid-row:1;justify-self:center;width:72px;height:72px}
+.draft-topbar .team-head .logo.empty{display:block;visibility:hidden}
+.draft-topbar .team-head .team-copy{grid-column:2;grid-row:1;min-width:0;text-align:center}
+.draft-topbar .team-head .team-name{font-size:54px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.draft-topbar .team-head .team-short{display:none}
+.draft-topbar .team-head .series-score{grid-column:3;grid-row:1;justify-self:center;margin:0;order:initial;font-size:64px}
+.draft-topbar .team-head.red .logo{grid-column:3}
+.draft-topbar .team-head.red .series-score{grid-column:1}
 .draft-topbar .event-center{flex-direction:column;gap:3px;padding:5px 12px}
 .draft-topbar .event-logo{width:160px;height:64px;flex-shrink:0}
 .draft-topbar .event-name{font-size:13px;line-height:16px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
