@@ -16,6 +16,8 @@ if(!fs.existsSync(STATE_FILE))fs.copyFileSync(path.join(ROOT,'data','state.examp
 const DDRAGON_ROOT = path.join(ROOT, 'data', 'ddragon');
 const PORT = Number(process.env.HUD_TEST_PORT || process.env.PORT || 3197);
 let state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+function normalizeSideColors(){if(state.blue)state.blue.color='#0050d1';if(state.red)state.red.color='#ff4f6d'}
+normalizeSideColors();
 let clients = new Set();
 let lcu = null;
 let championMap = new Map();
@@ -290,28 +292,34 @@ const spellKey=spell=>{
   const key=String(spell?.rawDisplayName||'').match(/SummonerSpell_([^_]+)_DisplayName/i)?.[1]||'';
   return key.startsWith('SummonerFlashPerksHextechFlashtraption')?'SummonerFlash':key;
 };
-async function syncLiveGame() {
+async function syncLiveGame(webRoom=null) {
   try {
     const live=await liveRequest();
-    state.draft.activeBanSlots={blue:-1,red:-1};
+    if (webRoom!==null&&(!state.webDraft?.enabled||state.webDraft.room!==webRoom||state.webDraft.status!=='complete')) return false;
+    if (webRoom===null&&state.webDraft?.enabled) return false;
+    if (webRoom===null) state.draft.activeBanSlots={blue:-1,red:-1};
     const seconds=Math.max(0,Math.floor(live.gameData?.gameTime||0));
     if (lastLiveSeconds!==null&&seconds<lastLiveSeconds-10) { clearGoldOcr(); state.game.goldHistory=[]; }
     lastLiveSeconds=seconds;
     state.game.clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
     const teams={blue:(live.allPlayers||[]).filter(p=>p.team==='ORDER'),red:(live.allPlayers||[]).filter(p=>p.team==='CHAOS')};
+    const championId=p=>Number(p.championId||0)||championLookup.get(String(p.rawChampionName||'').replace(/^game_character_displayname_/i,'').replace(/^character_/i,'').replace(/_name$/i,'').toLowerCase())||championLookup.get(String(p.championName||'').toLowerCase())||0;
     for (const side of ['blue','red']) {
       if (!teams[side].length) continue;
-      teams[side].slice(0,5).forEach((p,i)=>{apiCsCells[side][i]=Number(p.scores?.creepScore||0)});
+      const existing=state.draft[side+'Picks']||[];
+      const ordered=webRoom===null?teams[side]:existing.map(p=>teams[side].find(player=>championId(player)===Number(p.id))||null);
+      ordered.slice(0,5).forEach((p,i)=>{if(p)apiCsCells[side][i]=Number(p.scores?.creepScore||0)});
       // Broadcast player names are manual settings; never overwrite them with account nicknames.
-      state.draft[side+'Picks']=teams[side].map((p,index)=>({
-        id:Number(p.championId||0)||championLookup.get(String(p.rawChampionName||'').replace(/^game_character_displayname_/i,'').replace(/^character_/i,'').replace(/_name$/i,'').toLowerCase())||championLookup.get(String(p.championName||'').toLowerCase())||0,
-        skinId:Number(p.skinID||p.skinId||0), name:p.championName||'CHAMPION', level:Number(p.level||0),
+      state.draft[side+'Picks']=ordered.map((p,index)=>p?({
+        ...(webRoom!==null?existing[index]:{}),
+        id:championId(p),
+        skinId:webRoom!==null?(existing[index].skinId||0):Number(p.skinID||p.skinId||0), name:webRoom!==null?existing[index].name:(p.championName||'CHAMPION'), level:Number(p.level||0),
         kda:{kills:Number(p.scores?.kills||0),deaths:Number(p.scores?.deaths||0),assists:Number(p.scores?.assists||0)},
         cs:latestScreenCs(side,index)??0, items:(p.items||[]).map((item,slot)=>({id:Number(item.itemID||item.itemId||0),slot:item.slot!==undefined&&Number.isInteger(Number(item.slot))?Number(item.slot):slot,count:Number(item.count||1),name:item.displayName||''})),
         spells:Object.values(p.summonerSpells||{}).slice(0,2).map(spell=>({key:spellKey(spell),name:spell.displayName||''})),
         keystone:{id:Number(p.runes?.keystone?.id||0),name:p.runes?.keystone?.displayName||''},
         isDead:Boolean(p.isDead),respawnTimer:Math.max(0,Math.ceil(Number(p.respawnTimer)||0)),ultLearned:Number(p.level||0)>=6
-      })).slice(0,5);
+      }):existing[index]).slice(0,5);
       state.game[side+'Kills']=teams[side].reduce((n,p)=>n+Number(p.scores?.kills||0),0);
       const roleMap={TOP:'top',JUNGLE:'jungle',MIDDLE:'mid',BOTTOM:'bot',UTILITY:'support',SUPPORT:'support'};
       const fallback=['top','jungle','mid','bot','support'];
@@ -402,10 +410,14 @@ async function syncLiveGame() {
 }
 let leagueSyncBusy=false;
 async function syncLeague() {
-  if(state.webDraft?.enabled)return;
   if (!state.connection.autoSync||leagueSyncBusy) return;
   leagueSyncBusy=true;
   try {
+    if (state.webDraft?.enabled) {
+      if (state.webDraft.status==='complete') await syncLiveGame(state.webDraft.room);
+      broadcast();
+      return;
+    }
     lcu = loadCredentials();
     if (!lcu) throw new Error('롤 클라이언트를 찾지 못했습니다');
     const phase = await lcuRequest('/lol-gameflow/v1/gameflow-phase');
@@ -545,7 +557,7 @@ const server = http.createServer(async (req,res) => {
   }
   if (u.pathname === '/api/state' && req.method === 'GET') return json(res,200,state);
   if (u.pathname === '/api/state' && req.method === 'POST') {
-    try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});delete patch.webDraft;merge(state,patch); save(); broadcast(); return json(res,200,{ok:true,state}); }
+    try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});delete patch.webDraft;merge(state,patch);normalizeSideColors();save(); broadcast(); return json(res,200,{ok:true,state}); }
     catch(e) { return json(res,400,{ok:false,error:e.message}); }
   }
   if (u.pathname === '/api/events') {

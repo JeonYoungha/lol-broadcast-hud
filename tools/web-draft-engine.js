@@ -65,6 +65,7 @@ function createEngine(state,{now=Date.now,championName,championIds,random=Math.r
       if(!['side','pick'].includes(options.category)||(options.category==='side'&&(!['blue','red'].includes(options.selection)||!['first','second'].includes(options.opponent)))||(options.category==='pick'&&(!['first','second'].includes(options.selection)||!['blue','red'].includes(options.opponent))))throw Error('다음 세트 RoFS 선택을 확인하세요.');
     }
     state.fearless.undo={blue:structuredClone(state.blue),red:structuredClone(state.red),draft:structuredClone(state.draft),event:structuredClone(state.event||{}),webDraft:structuredClone(w)};
+    if(state.result?.snapshot&&state.result.snapshot.seriesScorePending===undefined&&Number(state.result.snapshot.event?.game)===Number(state.event?.game))state.result.snapshot.seriesScorePending=true;
     state.fearless.games.push({game:state.fearless.games.length+1,picks,winner:options.winner});
     state[options.winner].score=won;
     if(won>=3){state.fearless.complete=true;w.notice='시리즈 종료';publish();return}

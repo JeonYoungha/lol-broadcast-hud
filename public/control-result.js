@@ -36,7 +36,7 @@ window.ResultControls=(()=>{
  function status(text,keep=true){byId('resultStatus').textContent=text;if(keep)noticeUntil=Date.now()+5000}
  async function update(patch){const response=await HUD.update(patch);if(!response.ok)throw Error(response.error||'결과 저장 실패');return response}
  byId('resultWinner').onchange=async()=>{try{await update({result:{winner:byId('resultWinner').value}})}catch(e){status(e.message)}};
- byId('captureResult').onclick=async()=>{try{await update({result:{snapshot:ResultCore.snapshot(HUD.state),winner:byId('resultWinner').value,damageImage:'',damageData:null,goldData:null,goldImage:''}});status('현재 경기 통계를 저장했어요. 딜량과 골드 차이 이미지를 올려주세요.')}catch(e){status(e.message)}};
+ byId('captureResult').onclick=async()=>{try{const snapshot=ResultCore.snapshot(HUD.state);snapshot.seriesScorePending=!HUD.state.fearless?.games?.some(game=>Number(game.game)===Number(snapshot.event.game));await update({result:{snapshot,winner:byId('resultWinner').value,damageImage:'',damageData:null,goldData:null,goldImage:''}});status('현재 경기 통계를 저장했어요. 딜량과 골드 차이 이미지를 올려주세요.')}catch(e){status(e.message)}};
  byId('removeResultImage').onclick=async()=>{try{await update({result:{damageImage:'',damageData:null}})}catch(e){status(e.message)}};
  byId('damageEditRows').addEventListener('change',async event=>{
   const input=event.target,side=input.dataset.side,index=Number(input.dataset.index),key=input.dataset.key;if(!side||!key)return;

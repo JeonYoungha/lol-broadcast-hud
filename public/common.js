@@ -10,7 +10,7 @@ window.HUD = (() => {
   const escape = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   async function init(cb) {
     if (cb) listeners.push(cb);
-    const notify=next=>{state=next;for(const fn of listeners){try{fn(state)}catch(error){console.error('HUD render failed',error)}}};
+    const notify=next=>{if(next.blue)next.blue.color='#0050d1';if(next.red)next.red.color='#ff4f6d';state=next;for(const fn of listeners){try{fn(state)}catch(error){console.error('HUD render failed',error)}}};
     if(!['127.0.0.1','localhost','[::1]'].includes(location.hostname)){
       let last='',timer=null,inFlight=false,urgent=false;
       async function poll(){if(inFlight){urgent=true;return}inFlight=true;const started=performance.now();let failed=false;try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('외부 밴픽 연결 실패');const next=await response.json(),serialized=JSON.stringify(next);document.body.classList.remove('disconnected');if(serialized!==last){last=serialized;notify(next)}}catch(error){document.body.classList.add('disconnected');failed=true}finally{inFlight=false;const delay=urgent?0:failed?1500:Math.max(25,250-(performance.now()-started));urgent=false;timer=setTimeout(poll,delay)}}
