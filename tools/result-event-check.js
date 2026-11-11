@@ -13,5 +13,7 @@ state.result.snapshot.blue={name:'Team A',short:'A',logo:'/old-a.png'};state.res
 state.blue={name:'Team B',short:'B',logo:'/new-b.png'};state.red={name:'Team A',short:'A',logo:'/new-a.png'};state.event.logo='/event-logo.png';context.HUD.render(state);
 assert(root.innerHTML.includes('/event-logo.png'));assert(root.innerHTML.indexOf('/new-a.png')<root.innerHTML.indexOf('/new-b.png'));assert(!root.innerHTML.includes('/old-a.png'));
 state.red.logo='/updated-a.png';context.HUD.render(state);assert(root.innerHTML.includes('/updated-a.png'));
-state.blue={name:'Other B',short:'OTHERB'};state.red={name:'Other A',short:'OTHERA'};context.HUD.render(state);assert(root.innerHTML.includes('/old-a.png'));assert(root.innerHTML.includes('/old-b.png'));
+state.red.name='Renamed Team A';context.HUD.render(state);assert(root.innerHTML.includes('<strong>Renamed Team A</strong>'));assert(root.innerHTML.includes('<strong>Team B</strong>'));
+state.red.logo='data:image/svg+xml;base64,PHN2Zy8+';state.event.logo='data:image/svg+xml;base64,PHN2ZyBldmVudD0iMSIvPg==';context.HUD.render(state);assert(root.innerHTML.includes(state.red.logo));assert(root.innerHTML.includes(state.event.logo));
+state.blue={name:'TEAM_X',logo:'/team-x.png'};state.red={name:'TEAM_Y',logo:'/team-y.png'};context.HUD.render(state);assert(root.innerHTML.includes('<strong>TEAM_X</strong>'));assert(root.innerHTML.includes('<strong>TEAM_Y</strong>'));assert(root.innerHTML.includes('/team-x.png'));assert(root.innerHTML.includes('/team-y.png'));
 console.log('PASS result displays live event settings while preserving saved game stats');
