@@ -1,5 +1,7 @@
 const fs=require('fs'),os=require('os'),path=require('path'),assert=require('assert/strict'),{EventEmitter}=require('events'),{createPublicControl}=require('./public-draft-control');
-const root=fs.mkdtempSync(path.join(os.tmpdir(),'hud-public-control-'));fs.mkdirSync(path.join(root,'data'));fs.mkdirSync(path.join(root,'runtime'));fs.writeFileSync(path.join(root,'runtime/cloudflared.exe'),'fixture');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'hud-public-control-'));fs.mkdirSync(path.join(root,'data'));fs.mkdirSync(path.join(root,'runtime'));
+const missing=createPublicControl(root);assert.equal(missing.get().cloudflaredInstalled,false);assert.throws(()=>missing.begin(),/연결 도구가 없습니다/);
+fs.writeFileSync(path.join(root,'runtime/cloudflared.exe'),'fixture');assert.equal(missing.get().cloudflaredInstalled,true);
 let calls=0,last;const live=new Set();const control=createPublicControl(root,{alive:pid=>live.has(pid),launch:(file,args,options)=>{calls++;const child=new EventEmitter();child.pid=1000+calls;live.add(child.pid);last=child;assert.equal(options.windowsHide,true);assert.equal(options.detached,true);assert.deepEqual(args,['tools/start-public-draft.js']);return child}});
 assert.equal(control.get().running,false);control.begin();assert.equal(calls,1);assert.equal(control.get().running,true);assert.equal(control.get().ready,false);control.begin();assert.equal(calls,1);
 const stateFile=path.join(root,'data/public-draft.json');let info=JSON.parse(fs.readFileSync(stateFile));fs.writeFileSync(stateFile,JSON.stringify({...info,ready:true,url:'https://test.trycloudflare.com'}));assert.equal(control.get().ready,true);

@@ -48,4 +48,5 @@
 .result-gold svg{width:100%;height:150px;overflow:visible}
 .result-gold .no-history{height:150px;display:grid;place-items:center;color:#8b99a4;font-size:15px}
 .result-footer{position:absolute;left:64px;right:64px;bottom:24px;display:flex;justify-content:space-between;color:#8998a4;font-size:13px;letter-spacing:.06em}
+.result-event-brand{display:flex;align-items:center;gap:9px}.result-event-brand img{width:28px;height:28px;object-fit:contain}
 .result-pending{position:absolute;right:68px;bottom:52px;font-size:12px;color:#d5b96a}

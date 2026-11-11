@@ -7,7 +7,7 @@ if(new URLSearchParams(location.search).has('preview')){
 const esc=HUD.escape;
 const englishChampions=new Map();
 const safeImage=src=>/^(\/[^\/]|data:image\/(?:png|jpeg|webp);base64,|https?:\/\/)/i.test(src||'')?src:'';
-const team=(s,side,winner)=>{const t=s[side],logo=safeImage(t.logo);return '<div class="result-team '+side+' '+(winner===side?'win':'')+'">'+(logo?'<img src="'+esc(logo)+'">':'<span class="result-logo-fallback">'+esc((t.short||side).slice(0,3))+'</span>')+'<strong>'+esc(t.short||t.name)+'</strong><b>'+esc(t.score||0)+'</b><em>'+(winner?winner===side?'WIN':'LOSS':'—')+'</em></div>'};
+const team=(s,side,winner,current)=>{const t=s[side],candidates=['blue','red'].map(key=>current?.[key]).filter(Boolean),name=String(t.name||'').trim(),short=String(t.short||'').trim(),byName=name?candidates.filter(x=>String(x.name||'').trim()===name):[],byShort=short?candidates.filter(x=>String(x.short||'').trim()===short):[],match=byName.length===1?byName[0]:byName.length===0&&byShort.length===1?byShort[0]:null,logo=safeImage(match?match.logo:t.logo);return '<div class="result-team '+side+' '+(winner===side?'win':'')+'">'+(logo?'<img src="'+esc(logo)+'" alt="">':'<span class="result-logo-fallback">'+esc((t.short||side).slice(0,3))+'</span>')+'<strong>'+esc(t.short||t.name)+'</strong><b>'+esc(t.score||0)+'</b><em>'+(winner?winner===side?'WIN':'LOSS':'—')+'</em></div>'};
 const dragon=t=>{const key=String(t||'').toLowerCase();return /fire|infernal/.test(key)?'infernal':/ocean|water/.test(key)?'ocean':/mountain|earth/.test(key)?'mountain':/cloud|air/.test(key)?'cloud':/hextech/.test(key)?'hextech':/chemtech/.test(key)?'chemtech':/elder/.test(key)?'elder':''};
 const drakes=types=>types?.length?'<span class="result-objectives">'+types.map(t=>{const key=dragon(t);return key?'<img src="/assets/hud/dragon-'+key+'.png" title="'+esc(t)+'">':'<span>◆</span>'}).join('')+'</span>':'—';
 const bans=ids=>'<span class="result-bans">'+Array.from({length:5},(_,i)=>ids?.[i]?'<img src="'+HUD.icon(ids[i])+'">':'<span class="result-ban-empty"></span>').join('')+'</span>';
@@ -39,9 +39,9 @@ function renderResult(s){
  if(!s)return;
  const result=s.result||{},snapshot=result.snapshot||ResultCore.snapshot(s);
  const currentEvent={...snapshot.event,...s.event};
- const sig=JSON.stringify({snapshot,result,currentEvent});if(sig===signature)return;signature=sig;
+ const sig=JSON.stringify({snapshot,result,currentEvent,currentTeams:{blue:s.blue,red:s.red}});if(sig===signature)return;signature=sig;
  const g=snapshot.game,winner=result.winner||'';
- root.innerHTML='<header class="result-header">'+team(snapshot,'blue',winner)+'<div class="result-time"><small>GAME TIME</small><b>'+esc(g.clock||'00:00')+'</b></div>'+team(snapshot,'red',winner)+'</header><div class="result-columns"><section class="result-left"><h2 class="result-title">GAME STATS</h2>'+
+ root.innerHTML='<header class="result-header">'+team(snapshot,'blue',winner,s)+'<div class="result-time"><small>GAME TIME</small><b>'+esc(g.clock||'00:00')+'</b></div>'+team(snapshot,'red',winner,s)+'</header><div class="result-columns"><section class="result-left"><h2 class="result-title">GAME STATS</h2>'+ 
  row('K / D / A',esc(ResultCore.kda(snapshot,'blue')),esc(ResultCore.kda(snapshot,'red')))+
  row('GOLD',esc(g.blueGold||'—'),esc(g.redGold||'—'))+
  row('TOWERS',esc(g.blueTowers??0),esc(g.redTowers??0))+
@@ -51,7 +51,7 @@ function renderResult(s){
  row('ELDERS',drakes(Array.from({length:Math.max(0,Math.min(10,Number(g.blueElders??(g.blueDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0))},()=>'Elder')),drakes(Array.from({length:Math.max(0,Math.min(10,Number(g.redElders??(g.redDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0))},()=>'Elder')))+
  row('BARONS',esc(g.blueBarons??0),esc(g.redBarons??0))+
  row('BANS',bans(snapshot.draft.blueBans),bans(snapshot.draft.redBans))+
- '</section><section><h2 class="result-title">TOTAL DAMAGE TO CHAMPIONS</h2><div class="result-damage">'+damageGraph(result.damageData,snapshot)+'</div><div class="result-gold"><h2 class="result-title">GOLD DIFFERENCE</h2>'+goldGraph(g.goldHistory)+'</div></section></div><footer class="result-footer"><span>'+esc(currentEvent.name)+'</span><span>'+esc(currentEvent.round)+' · GAME '+esc(currentEvent.game)+'</span></footer>'+(result.snapshot?'':'<div class="result-pending">결과 저장 전 미리보기</div>');
+ '</section><section><h2 class="result-title">TOTAL DAMAGE TO CHAMPIONS</h2><div class="result-damage">'+damageGraph(result.damageData,snapshot)+'</div><div class="result-gold"><h2 class="result-title">GOLD DIFFERENCE</h2>'+goldGraph(g.goldHistory)+'</div></section></div><footer class="result-footer"><span class="result-event-brand">'+(safeImage(currentEvent.logo)?'<img src="'+esc(safeImage(currentEvent.logo))+'" alt="">':'')+esc(currentEvent.name)+'</span><span>'+esc(currentEvent.round)+' · GAME '+esc(currentEvent.game)+'</span></footer>'+(result.snapshot?'':'<div class="result-pending">결과 저장 전 미리보기</div>');
  root.querySelector('.result-gold svg')?.setAttribute('preserveAspectRatio','none');
 }
 fetch('/api/champion-list?lang=en').then(r=>r.json()).then(list=>{
