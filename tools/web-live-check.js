@@ -9,7 +9,9 @@ const ctx={state,championLookup:new Map(),apiCsCells:{blue:[],red:[]},screenGrub
 vm.createContext(ctx);vm.runInContext(code,ctx);
 (async()=>{
  await ctx.syncLeague();assert.equal(calls,0);assert.equal(state.draft.bluePicks[0].kda,undefined);
- state.webDraft.status='complete';await ctx.syncLeague();assert.equal(calls,1);assert.equal(state.game.clock,'02:00');assert.equal(state.game.blueTowers,1);assert.equal(state.game.blueKills,7);
+ state.game.manualBarons=true;state.game.blueBarons=3;state.game.redBarons=2;state.game.manualHeralds=true;state.game.blueHeralds=1;state.game.redHeralds=1;
+ state.webDraft.status='complete';await ctx.syncLeague();assert.equal(calls,1);assert.equal(state.game.clock,'02:00');assert.equal(state.game.blueTowers,1);assert.equal(state.game.blueKills,7);assert.equal(state.game.blueBarons,3);assert.equal(state.game.redBarons,2);assert.equal(state.game.blueHeralds,1);assert.equal(state.game.redHeralds,1);
+ state.game.manualBarons=false;state.game.manualHeralds=false;await ctx.syncLeague();assert.equal(state.game.blueBarons,0);assert.equal(state.game.blueHeralds,0);
  assert.deepEqual(Array.from(state.draft.bluePicks,p=>p.id),[1,2]);assert.equal(state.draft.bluePicks[0].kda.kills,3);assert.equal(state.draft.bluePicks[1].kda.kills,4);assert(state.draft.bluePicks.every(p=>p.locked));assert.deepEqual(state.draft.blueBans,[4]);assert(broadcasts>0);
  let resolve;ctx.liveRequest=()=>new Promise(r=>{resolve=r});const pending=ctx.syncLeague();state.webDraft={enabled:true,status:'lobby',room:'room-2'};resolve({...live,gameData:{gameTime:300}});await pending;assert.equal(state.game.clock,'02:00');
  console.log('PASS web draft remains intact while completed draft receives live stats; stale responses are ignored');

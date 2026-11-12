@@ -100,6 +100,9 @@
 .match-main{background:linear-gradient(180deg,#10151e,#070b11);border-bottom-color:rgba(126,141,162,.38)}
 .match-sub{background:#080c13}
 .match-mark{background:#0a0f17}
+.ingame .match-mark{position:relative;width:100%;max-width:100%;justify-self:stretch;border:0;background:linear-gradient(90deg,rgba(57,214,232,.075) 0,rgba(57,214,232,.075) calc(50% - 36px),#0a0f17 calc(50% - 36px),#0a0f17 calc(50% + 36px),rgba(255,79,109,.075) calc(50% + 36px),rgba(255,79,109,.075) 100%)}
+.ingame .match-mark:before{content:"";position:absolute;top:0;bottom:0;left:calc(50% - 36px);width:72px;box-sizing:border-box;border-left:1px solid #252d3b;border-right:1px solid #252d3b;pointer-events:none}
+.ingame .match-mark .match-event-logo{width:68px;max-width:100%}
 .score-numbers{background:linear-gradient(90deg,transparent,rgba(57,214,232,.075))}
 .score-numbers.red{background:linear-gradient(270deg,transparent,rgba(255,79,109,.075))}
 .score-numbers .kills,.gold-copy b,.clock-block b,.score-team-copy strong{ text-shadow:0 1px 1px rgba(0,0,0,.95) }
@@ -117,6 +120,7 @@
 .score-metric.gold{height:58px;align-items:center}
 .gold-copy{position:relative;height:58px;display:block}
 .gold-copy b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);line-height:1;white-space:nowrap}
+.ingame .score-metric.tower b{font-size:var(--gold-font,28px);font-weight:950;line-height:1;color:#f7f9fc;letter-spacing:.025em;text-shadow:0 1px 1px rgba(0,0,0,.95)}
 .gold-copy em{position:absolute;z-index:2;left:50%;top:calc(50% + 11px);transform:translateX(-50%);margin:0;white-space:nowrap}
 .gold-copy em.empty{visibility:hidden}
 .score-team-copy{display:flex;align-items:center;height:100%}
@@ -134,3 +138,10 @@
 .ingame .item-list .item-slot.trinket{border-color:#69778f;flex-shrink:0}
 .ingame .role-quest,.ingame .role-quest.complete{width:21px;height:21px;opacity:1;animation:none;filter:grayscale(1) brightness(.7);transition:filter .2s ease}
 .ingame .role-quest.complete{filter:none}
+
+/* Spectator player names aligned above the five portrait panels at 1920x1080. */
+.ingame .player-labels{position:absolute;z-index:25;top:132px;width:150px;display:grid;grid-template-rows:repeat(5,103px);pointer-events:none}
+.ingame .player-labels.blue{left:0;justify-items:start}.ingame .player-labels.red{right:0;justify-items:end}
+.ingame .player-label-row{width:100%;height:22px;display:flex;align-items:center}.ingame .player-labels.red .player-label-row{justify-content:flex-end}
+.ingame .player-label{display:block;box-sizing:border-box;width:76px;max-width:76px;padding:2px 3px;background:#0a0f19;border-left:3px solid #0050d1;color:#fff;font-size:15px;font-weight:800;line-height:18px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px #000}
+.ingame .player-labels.red .player-label{border-left:0;border-right:3px solid #ff4f6d}

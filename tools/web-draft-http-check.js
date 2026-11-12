@@ -1,14 +1,17 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{spawn}=require('child_process');
 async function main(){
  const source=path.resolve(__dirname,'..'),scratch=fs.mkdtempSync(path.join(require('os').tmpdir(),'hud-web-draft-'));
- for(const dir of ['public','tools','data'])fs.cpSync(path.join(source,dir),path.join(scratch,dir),{recursive:true});
- fs.copyFileSync(path.join(source,'server.js'),path.join(scratch,'server.js'));
- const stateFile=path.join(scratch,'data/state.json'),state=JSON.parse(fs.readFileSync(stateFile));state.connection.autoSync=false;state.game.screenGoldOcr=false;delete state.webDraft;fs.writeFileSync(stateFile,JSON.stringify(state));
+ for(const dir of ['public','tools'])fs.cpSync(path.join(source,dir),path.join(scratch,dir),{recursive:true,filter:p=>!p.startsWith(path.join(source,'public','uploads'))});
+ fs.mkdirSync(path.join(scratch,'data','ddragon'),{recursive:true});for(const name of ['champions.json','hud-static.json','item-prices.json']){const file=path.join(source,'data','ddragon',name);if(fs.existsSync(file))fs.copyFileSync(file,path.join(scratch,'data','ddragon',name))}
+ const server=fs.readFileSync(path.join(source,'server.js'),'utf8');assert(server.includes('\nstartGoldOcr();'));fs.writeFileSync(path.join(scratch,'server.js'),server.replace('\nstartGoldOcr();','\n// Screen capture is disabled in the isolated HTTP test.'));
+ const stateFile=path.join(scratch,'data/state.json'),state=JSON.parse(fs.readFileSync(path.join(source,'data/state.json')));state.connection.autoSync=false;state.connection.leaguePath='';state.game.screenGoldOcr=false;state.game.autoQuestIcons=false;state.game.goldHistory=[];for(const side of ['blue','red']){state[side].name=side;state[side].short=side;state[side].logo='';state[side].players=Array(5).fill('')}state.event.name='Test';state.event.logo='';delete state.webDraft;delete state.fearless;delete state.clientFearless;delete state.result;fs.writeFileSync(stateFile,JSON.stringify(state));
  const child=spawn(process.execPath,['server.js'],{cwd:scratch,env:{...process.env,HUD_TEST_PORT:'3198',HUD_HOST:'127.0.0.1'},windowsHide:true,stdio:'ignore'});
  const base='http://127.0.0.1:3198';
  function request(url,body,headers={}){return new Promise((resolve,reject)=>{const data=body?JSON.stringify(body):'';const req=require('http').request(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(body?{'Content-Length':Buffer.byteLength(data)}:{}),...headers}},res=>{let text='';res.on('data',chunk=>text+=chunk);res.on('end',()=>{try{resolve({code:res.statusCode,body:JSON.parse(text)})}catch(error){reject(error)}})});req.on('error',reject);req.end(data)})}
  try{
   let ready=false;for(let i=0;i<100;i++){try{await request('/api/state');ready=true;break}catch(_){await new Promise(r=>setTimeout(r,100))}}assert(ready);
+  const beforeSwap=(await request('/api/state')).body;assert.equal((await request('/api/teams/swap',{})).code,200);const afterSwap=(await request('/api/state')).body;assert.equal(afterSwap.blue.name,beforeSwap.red.name);assert.equal(afterSwap.red.name,beforeSwap.blue.name);assert.equal(afterSwap.blue.color,'#0050d1');assert.equal(afterSwap.red.color,'#ff4f6d');assert.equal((await request('/api/teams/swap',{})).code,200);
+  assert.equal((await request('/api/state',{game:{manualBarons:true,blueBarons:2,manualHeralds:true,redHeralds:1}})).code,200);const manual=(await request('/api/state')).body;assert.equal(manual.game.blueBarons,2);assert.equal(manual.game.redHeralds,1);
   const created=await request('/api/web-draft/admin',{action:'create',seconds:10});assert.equal(created.code,200);
   const tokens=Object.fromEntries(['blue','red'].map(side=>[side,created.body.links[side].split('#')[1]]));
   assert.equal((await request('/api/web-draft/admin',{action:'pause'},{Host:'remote.test'})).code,403);
@@ -17,6 +20,7 @@ async function main(){
   assert.equal((await request('/api/web-draft/admin',{action:'pause'},{Origin:'https://wrong.test'})).code,403);
   const command=async(side,action,extra={})=>{const s=(await request('/api/state')).body;return request('/api/web-draft/action',{room:s.webDraft.room,step:s.webDraft.step,action,...extra},{Authorization:'Bearer '+tokens[side],Host:'remote.test',Origin:'http://remote.test'})};
   assert.equal((await command('blue','ready')).code,200);assert.equal((await command('red','ready')).code,200);
+  assert.equal((await request('/api/teams/swap',{})).code,409);
   assert.equal((await command('red','hover',{id:1})).code,409);
   assert.equal((await command('blue','skip')).code,409);
   const champions=(await request('/api/champion-list?lang=en')).body;

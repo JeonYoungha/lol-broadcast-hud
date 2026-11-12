@@ -15,6 +15,8 @@ public static class HudWindow {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  public static bool IsForeground(int processId) { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid == processId; }
   public static bool TryFind(int processId, out RECT best) {
     RECT selected = new RECT(); bool found = false; long bestArea = 0;
     EnumWindows((hwnd, param) => {
@@ -66,6 +68,11 @@ try {
       $screenBounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
       $gameBounds = $screenBounds
       $game = Get-Process -Name 'League of Legends' -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $game) {
+        [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='no-game';questIconCapture='no-game'} | ConvertTo-Json -Compress))
+        Start-Sleep -Milliseconds 1000
+        continue
+      }
       if ($game) {
         $rect = New-Object HudWindow+RECT
         if ([HudWindow]::TryFind($game.Id,[ref]$rect)) {
@@ -116,6 +123,33 @@ try {
       }
       $digitBitmap.Save($digitCapturePath,[Drawing.Imaging.ImageFormat]::Png)
       $digitBitmap.Dispose()
+      $questIcons=@{blue=@();red=@()}
+      $visibleBars=0
+      if($game -and -not [HudWindow]::IsForeground($game.Id)){
+        foreach($barX in @(31,1844)){for($row=0;$row -lt 5;$row++){
+          $foundGreen=$false
+          for($dx=0;$dx -lt 36 -and -not $foundGreen;$dx+=3){for($dy=0;$dy -lt 7;$dy+=2){
+            $px=[int][math]::Round($gameBounds.Left+($barX+$dx)*$scaleX);$py=[int][math]::Round($gameBounds.Top+(204+$row*103+$dy)*$scaleY)
+            if($px -ge 0 -and $py -ge 0 -and $px -lt $bitmap.Width -and $py -lt $bitmap.Height){$c=$bitmap.GetPixel($px,$py);if($c.G -gt 80 -and $c.G -gt $c.R*1.2 -and $c.G -gt $c.B*1.05){$foundGreen=$true;break}}
+          }}
+          if($foundGreen){$visibleBars++}
+        }}
+      }
+      $questIconCapture=if(-not $game){'no-game'}elseif([HudWindow]::IsForeground($game.Id) -or $visibleBars -ge 2){'active'}else{'not-visible'}
+      if($questIconCapture -eq 'active'){
+        foreach($side in @('blue','red')){
+          $startX=if($side -eq 'blue'){8}else{1898}
+          for($row=0;$row -lt 5;$row++){
+            $bytes=New-Object byte[] 192; $n=0
+            for($dy=0;$dy -lt 8;$dy++){for($dx=0;$dx -lt 8;$dx++){
+              $px=[int][math]::Round($gameBounds.Left+($startX+$dx*1.5)*$scaleX)
+              $py=[int][math]::Round($gameBounds.Top+(205+$row*103+$dy*1.5)*$scaleY)
+              if($px -ge 0 -and $py -ge 0 -and $px -lt $bitmap.Width -and $py -lt $bitmap.Height){$pixel=$bitmap.GetPixel($px,$py);$bytes[$n]=$pixel.R;$bytes[$n+1]=$pixel.G;$bytes[$n+2]=$pixel.B};$n+=3
+            }}
+            $questIcons[$side]+= [Convert]::ToBase64String($bytes)
+          }
+        }
+      }
       $bitmap.Dispose()
       $blue = @($null,$null,$null,$null,$null)
       $red = @($null,$null,$null,$null,$null)
@@ -186,7 +220,7 @@ try {
       }
       $blueCount=@($blue | Where-Object { $null -ne $_ }).Count
       $redCount=@($red | Where-Object { $null -ne $_ }).Count
-      [Console]::Out.WriteLine(([pscustomobject]@{ok=($blueCount -gt 0 -and $redCount -gt 0);width=$gameBounds.Width;height=$gameBounds.Height;blue=$blue;red=$red;blueCs=$blueCs;redCs=$redCs;blueCsZoom=$blueCsZoom;redCsZoom=$redCsZoom;blueGrubs=$blueGrubs;redGrubs=$redGrubs;blueCsText=$blueCsText;redCsText=$redCsText;blueText=$blueText;redText=$redText;blueCount=$blueCount;redCount=$redCount} | ConvertTo-Json -Compress))
+      [Console]::Out.WriteLine(([pscustomobject]@{ok=($blueCount -gt 0 -and $redCount -gt 0);width=$gameBounds.Width;height=$gameBounds.Height;blue=$blue;red=$red;blueCs=$blueCs;redCs=$redCs;blueCsZoom=$blueCsZoom;redCsZoom=$redCsZoom;blueGrubs=$blueGrubs;redGrubs=$redGrubs;blueCsText=$blueCsText;redCsText=$redCsText;blueText=$blueText;redText=$redText;blueCount=$blueCount;redCount=$redCount;questIcons=$questIcons;questIconCapture=$questIconCapture} | ConvertTo-Json -Compress -Depth 4))
     } catch {
       [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='ocr';message=$_.Exception.Message;trace=$_.ScriptStackTrace} | ConvertTo-Json -Compress))
     }

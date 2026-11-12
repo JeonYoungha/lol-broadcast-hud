@@ -39,7 +39,8 @@ function renderDraft(s){
     nextLocks.set(key,locked);
     if(lastLayout&&locked&&!previousLocks.get(key))justLocked.add(key);
   });
-  const layout=JSON.stringify({event:s.event,blue:s.blue,red:s.red,bluePicks:visiblePicks(s.draft.bluePicks),redPicks:visiblePicks(s.draft.redPicks),blueBans:s.draft.blueBans,redBans:s.draft.redBans,fearless:s.fearless?.games});
+  const games=(s.webDraft?.enabled?s.fearless?.games:s.clientFearless?.games)||[];
+  const layout=JSON.stringify({event:s.event,blue:s.blue,red:s.red,bluePicks:visiblePicks(s.draft.bluePicks),redPicks:visiblePicks(s.draft.redPicks),blueBans:s.draft.blueBans,redBans:s.draft.redBans,fearless:games});
   document.documentElement.style.setProperty('--blue',s.blue.color);
   document.documentElement.style.setProperty('--red',s.red.color);
   if(layout!==lastLayout){
@@ -47,7 +48,7 @@ function renderDraft(s){
     app.innerHTML=`<header class="topbar draft-topbar">${teamHead(s.blue,'blue')}<div class="event-center">${logo(s.event.logo,'event-logo')}<div class="event-meta">${HUD.escape(s.event.round)} · GAME ${s.event.game} · BO${s.event.bestOf}</div></div>${teamHead(s.red,'red')}<div class="draft-countdown" role="progressbar" aria-label="밴픽 남은 시간" aria-valuemin="0"><i class="timer-blue"></i><i class="timer-red"></i></div></header>${side(s,'blue',justLocked)}<div class="draft-stage"><div class="phase-pill"><div class="phase-label">CHAMPION SELECT</div><div class="phase-time"></div></div></div>${side(s,'red',justLocked)}<footer class="banbar"><div class="bans blue">${bans(s.draft.blueBans)}</div><div class="ban-center">BANS</div><div class="bans red">${bans(s.draft.redBans)}</div></footer>`;
   }
   let history=app.querySelector('.fearless-history');if(!history){history=document.createElement('div');history.className='fearless-history';app.append(history)}
-  const games=s.fearless?.games||[];const historyKey=JSON.stringify(games);if(history.dataset.key!==historyKey){history.dataset.key=historyKey;history.innerHTML=games.map((game,i)=>`<div class="fearless-row"><span>GAME ${i+1}</span>${game.picks.map(id=>`<img src="${HUD.icon(id)}" alt="" title="${HUD.escape(String(id))}">`).join('')}</div>`).join('')}
+  const historyKey=JSON.stringify(games);if(history.dataset.key!==historyKey){history.dataset.key=historyKey;history.innerHTML=games.map((game,i)=>`<div class="fearless-row"><span>GAME ${i+1}</span>${game.picks.map(id=>`<img src="${HUD.icon(id)}" alt="" title="${HUD.escape(String(id))}">`).join('')}</div>`).join('')}
   document.documentElement.style.setProperty('--fearless-rows',String(games.length));
   previousLocks=nextLocks;
   updateBanWaiting(s);

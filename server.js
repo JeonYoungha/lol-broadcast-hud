@@ -6,6 +6,8 @@ const { URL } = require('url');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const { createEngine } = require('./tools/web-draft-engine');
+const clientFearless = require('./tools/client-fearless');
+const {createTracker:createQuestIconTracker} = require('./tools/quest-icon-tracker');
 const { createPublicControl } = require('./tools/public-draft-control');
 
 const ROOT = __dirname;
@@ -18,6 +20,8 @@ const PORT = Number(process.env.HUD_TEST_PORT || process.env.PORT || 3197);
 let state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
 function normalizeSideColors(){if(state.blue)state.blue.color='#0050d1';if(state.red)state.red.color='#ff4f6d'}
 normalizeSideColors();
+if(state.game?.autoQuestIcons)state.game.questIconStatus='인식 프로그램 응답 대기 중';
+function swapTeamSides(){const w=state.webDraft;if(w?.enabled&&(['running','paused','finished'].includes(w.status)||(w.status==='lobby'&&(w.ready?.blue||w.ready?.red))))throw Error('웹 밴픽 준비 또는 진행 중에는 팀을 교체할 수 없습니다. 세트 사이에 교체하세요.');[state.blue,state.red]=[state.red,state.blue];normalizeSideColors()}
 let clients = new Set();
 let lcu = null;
 let championMap = new Map();
@@ -67,6 +71,21 @@ let apiCsCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
 let screenGrubCounts={blue:null,red:null};
 let pendingGrubCounts={blue:null,red:null};
 let lastLiveSeconds=null;
+const questIconTracker=createQuestIconTracker();
+let autoQuestDetected={blue:{},red:{}};
+function resetQuestIconBaseline(){questIconTracker.reset();autoQuestDetected={blue:{},red:{}}}
+function setQuestIconStatus(status){if(state.game.questIconStatus!==status){state.game.questIconStatus=status;broadcast()}}
+function applyQuestIconSamples(data){
+ if(!state.game.autoQuestIcons)return;
+ if(data?.questIconCapture!=='active'){setQuestIconStatus(data?.questIconCapture==='not-visible'?'대기 중 · 롤 선수 패널이 화면에 보이도록 해주세요':'대기 중 · 롤 게임 화면을 찾지 못했습니다');return}
+ if(lastLiveSeconds===null||!data?.questIcons){setQuestIconStatus('대기 중 · 인게임 데이터 연결이 필요합니다');return}
+ const dead=Object.fromEntries(['blue','red'].map(side=>[side,(state.draft[side+'Picks']||[]).map(p=>Boolean(p.isDead))]));
+ const completed=Object.fromEntries(['blue','red'].map(side=>[side,state.game[side+'RoleQuests']||{}]));
+ const changes=questIconTracker.read(data.questIcons,dead,completed);const after=questIconTracker.status();setQuestIconStatus(`인식 중 · 기준 아이콘 ${after.baselines}/10개`);
+ if(!changes.length)return;
+ for(const {side,role} of changes){state.game[side+'RoleQuests']||={};state.game[side+'RoleQuests'][role]=true;autoQuestDetected[side][role]=true}
+ save();broadcast();
+}
 function latestScreenCs(side,index) {
   const cell=csCells[side]?.[index];
   return cell?cell.value:null;
@@ -131,7 +150,7 @@ function startGoldOcr() {
   const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',helper,'-ParentPid',String(process.pid)],{windowsHide:true,stdio:['ignore','pipe','ignore']});
   child.stdout.setEncoding('utf8');
   let pending='';
-  child.stdout.on('data',chunk=>{pending+=chunk;const lines=pending.split(/\r?\n/);pending=lines.pop()||'';for(const line of lines){try{applyGoldOcr(JSON.parse(line))}catch(_){}}});
+  child.stdout.on('data',chunk=>{pending+=chunk;const lines=pending.split(/\r?\n/);pending=lines.pop()||'';for(const line of lines){try{const data=JSON.parse(line);applyQuestIconSamples(data);applyGoldOcr(data)}catch(_){}}});
 }
 const merge = (target, patch) => {
   for (const [key, value] of Object.entries(patch || {})) {
@@ -299,11 +318,12 @@ async function syncLiveGame(webRoom=null) {
     if (webRoom===null&&state.webDraft?.enabled) return false;
     if (webRoom===null) state.draft.activeBanSlots={blue:-1,red:-1};
     const seconds=Math.max(0,Math.floor(live.gameData?.gameTime||0));
-    if (lastLiveSeconds!==null&&seconds<lastLiveSeconds-10) { clearGoldOcr(); state.game.goldHistory=[]; }
+    if (lastLiveSeconds!==null&&seconds<lastLiveSeconds-10) { clearGoldOcr(); state.game.goldHistory=[];if(state.game.autoQuestIcons){for(const side of ['blue','red'])for(const role of Object.keys(autoQuestDetected[side]))if(state.game[side+'RoleQuests'])state.game[side+'RoleQuests'][role]=false;resetQuestIconBaseline()} }
     lastLiveSeconds=seconds;
     state.game.clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
     const teams={blue:(live.allPlayers||[]).filter(p=>p.team==='ORDER'),red:(live.allPlayers||[]).filter(p=>p.team==='CHAOS')};
     const championId=p=>Number(p.championId||0)||championLookup.get(String(p.rawChampionName||'').replace(/^game_character_displayname_/i,'').replace(/^character_/i,'').replace(/_name$/i,'').toLowerCase())||championLookup.get(String(p.championName||'').toLowerCase())||0;
+    if(webRoom===null&&teams.blue.length===5&&teams.red.length===5&&clientFearless.capture(state,[...teams.blue,...teams.red].map(championId)))save();
     for (const side of ['blue','red']) {
       if (!teams[side].length) continue;
       const existing=state.draft[side+'Picks']||[];
@@ -328,7 +348,7 @@ async function syncLiveGame(webRoom=null) {
         const role=roleMap[String(p.position||'').toUpperCase()]||fallback[i];
         const signal=roleQuestSignal(p);
         if (!(role in roleState)) roleState[role]=false;
-        if (signal!==null) roleState[role]=signal;
+        if (signal!==null&&!autoQuestDetected[side][role]) roleState[role]=signal;
       });
       state.game[side+'RoleQuests']=roleState;
     }
@@ -385,6 +405,8 @@ async function syncLiveGame(webRoom=null) {
     }
     const manualGrubs=Boolean(state.game.manualGrubs);
     delete counts.blueDragons; delete counts.redDragons;
+    if(state.game.manualBarons){delete counts.blueBarons;delete counts.redBarons}
+    if(state.game.manualHeralds){delete counts.blueHeralds;delete counts.redHeralds}
     if (manualGrubs) { delete counts.blueGrubs; delete counts.redGrubs; }
     else for (const side of ['blue','red']) {
       if (Number.isInteger(screenGrubCounts[side])) counts[side+'Grubs']=screenGrubCounts[side];
@@ -432,6 +454,7 @@ async function syncLeague() {
     let session = null;
     try { session = await lcuRequest('/lol-champ-select/v1/session'); } catch (_) {}
     if (session) {
+      if(phase==='ChampSelect'&&clientFearless.nextDraft(state))save();
       let currentChampion = 0;
       try { currentChampion = Number(await lcuRequest('/lol-champ-select/v1/current-champion')) || 0; } catch (_) {}
       applyChampSelect(session,currentChampion);
@@ -555,9 +578,11 @@ const server = http.createServer(async (req,res) => {
   if(u.pathname==='/api/web-draft/action'&&req.method==='POST'){
     try{const side=teamFor(req);if(!side)return json(res,403,{error:'팀 접속 링크가 잘못됐거나 만료됐습니다.'});webDraft.command(side,await readBody(req));save();broadcast();return json(res,200,{ok:true});}catch(e){return json(res,409,{error:e.message})}
   }
+  if (u.pathname === '/api/client-fearless/reset' && req.method === 'POST') {clientFearless.reset(state);save();broadcast();return json(res,200,{ok:true});}
+  if (u.pathname === '/api/teams/swap' && req.method === 'POST') {try{swapTeamSides();save();broadcast();return json(res,200,{ok:true})}catch(error){return json(res,409,{ok:false,error:error.message})}}
   if (u.pathname === '/api/state' && req.method === 'GET') return json(res,200,state);
   if (u.pathname === '/api/state' && req.method === 'POST') {
-    try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});delete patch.webDraft;merge(state,patch);normalizeSideColors();save(); broadcast(); return json(res,200,{ok:true,state}); }
+    try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});if(typeof patch.game?.autoQuestIcons==='boolean'&&patch.game.autoQuestIcons!==Boolean(state.game.autoQuestIcons))resetQuestIconBaseline();delete patch.webDraft;merge(state,patch);normalizeSideColors();save(); broadcast(); return json(res,200,{ok:true,state}); }
     catch(e) { return json(res,400,{ok:false,error:e.message}); }
   }
   if (u.pathname === '/api/events') {
