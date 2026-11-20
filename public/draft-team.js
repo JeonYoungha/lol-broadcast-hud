@@ -27,6 +27,7 @@ window.DraftTeam=(()=>{
   app.addEventListener('pointermove',event=>{if(!drag||drag.pointer!==event.pointerId)return;if(Math.hypot(event.clientX-drag.x,event.clientY-drag.y)>6)drag.moved=true;if(!drag.moved)return;app.querySelectorAll('.drag-target').forEach(card=>card.classList.remove('drag-target'));const from=app.querySelector(`.draft-side.${team} .pick[data-swap-index="${drag.from}"]`);from?.classList.add('drag-source');const target=ownCard(document.elementFromPoint(event.clientX,event.clientY));if(target&&Number(target.dataset.swapIndex)!==drag.from)target.classList.add('drag-target');event.preventDefault()});
   app.addEventListener('pointerup',async event=>{if(!drag||drag.pointer!==event.pointerId)return;const gesture=drag,target=ownCard(document.elementFromPoint(event.clientX,event.clientY)),to=target?Number(target.dataset.swapIndex):-1;clearDrag();if(app.hasPointerCapture(event.pointerId))app.releasePointerCapture(event.pointerId);if(!gesture.moved||to<0||to===gesture.from||!swapEnabled()||gesture.room!==state.webDraft.room)return;const toId=state.draft[team+'Picks'][to].id;busy=true;render(state);try{await send('swap',{from:gesture.from,to,fromId:gesture.fromId,toId});message('픽 위치를 교환했습니다.')}catch(error){message(error.message)}finally{busy=false;render(state)}});
   app.addEventListener('pointercancel',clearDrag);app.addEventListener('lostpointercapture',clearDrag);
+  function updateClock(seconds){if(state?.webDraft?.status==='finished')el('teamStatus').textContent='자리 교환 · '+seconds+'초 남음'}
   function render(s){state=s;if(!s)return;const w=s.webDraft,turn=w?.room+':'+w?.step;if(turn!==lastTurn){selected=0;lastTurn=turn;drawGrid()}
     el('teamTitle').textContent=s[team].name+' · '+(team==='blue'?'블루':'레드');
     const own=available();el('teamStatus').textContent=!w?.enabled?'웹 밴픽 방 대기':w.status==='lobby'?'양 팀 준비 대기':w.status==='finished'?'자리 교환 · '+s.draft.timer+'초 남음':w.status==='complete'?'교환 종료 · 밴픽 확정':w.status==='paused'?'일시정지':own?(w.action.type==='ban'?'우리 팀 밴 차례':'우리 팀 픽 차례'):'상대 팀 선택 중';
@@ -42,5 +43,5 @@ window.DraftTeam=(()=>{
   }
   Promise.all([fetch('/api/champion-list').then(r=>{if(!r.ok)throw Error('챔피언 목록을 불러오지 못했습니다.');return r.json()}),fetch('/api/champion-list?lang=en').then(r=>r.json())]).then(([ko,en])=>{champions=ko.map(c=>({...c,english:en.find(e=>e.id===c.id)?.name||''}));drawGrid();render(state)}).catch(error=>message(error.message));
   if(!token)message('팀 전용 링크로 접속하세요.');
-  return {render};
+  return {render,updateClock};
 })();

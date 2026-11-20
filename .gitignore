@@ -2,6 +2,7 @@ data/state.json
 data/state.json.tmp
 data/web-draft-access.json
 data/public-draft.json
+data/public-hud.json
 data/ddragon/
 public/uploads/
 runtime/

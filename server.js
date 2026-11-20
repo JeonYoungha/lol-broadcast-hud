@@ -9,15 +9,19 @@ const { createEngine } = require('./tools/web-draft-engine');
 const clientFearless = require('./tools/client-fearless');
 const {createTracker:createQuestIconTracker} = require('./tools/quest-icon-tracker');
 const { createPublicControl } = require('./tools/public-draft-control');
+const { createLanHud } = require('./tools/lan-hud');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const publicConnection=createPublicControl(ROOT);
 const STATE_FILE = path.join(ROOT, 'data', 'state.json');
-if(!fs.existsSync(STATE_FILE))fs.copyFileSync(path.join(ROOT,'data','state.example.json'),STATE_FILE);
+if (!fs.existsSync(STATE_FILE)) fs.copyFileSync(path.join(ROOT, 'data', 'state.example.json'), STATE_FILE);
 const DDRAGON_ROOT = path.join(ROOT, 'data', 'ddragon');
 const PORT = Number(process.env.HUD_TEST_PORT || process.env.PORT || 3197);
 let state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+const lanHud=createLanHud({originPort:PORT,getState:()=>state});
+const externalHudGateway=createLanHud({originPort:PORT,listenPort:3202,bindHost:'127.0.0.1',getState:()=>state});
+const externalHud=createPublicControl(ROOT,{statusFile:'public-hud.json',script:'tools/start-public-hud.js'});
 function normalizeSideColors(){if(state.blue)state.blue.color='#0050d1';if(state.red)state.red.color='#ff4f6d'}
 normalizeSideColors();
 if(state.game?.autoQuestIcons)state.game.questIconStatus='인식 프로그램 응답 대기 중';
@@ -49,9 +53,10 @@ const save = () => {
 };
 let lastBroadcast='';
 const broadcast = () => {
-  const msg = `data: ${JSON.stringify(state)}\n\n`;
-  if(msg===lastBroadcast)return;
-  lastBroadcast=msg;
+  const signature=JSON.stringify(state);
+  if(signature===lastBroadcast)return;
+  lastBroadcast=signature;
+  const msg = `data: ${JSON.stringify({...state,serverNow:Date.now()})}\n\n`;
   for (const res of clients) if(!res.destroyed&&!res.writableEnded)res.write(msg);
 };
 const goldText = value => `${(Math.max(0,Number(value)||0)/1000).toFixed(1)}K`;
@@ -550,6 +555,12 @@ function analyzeGoldGraph(imagePath,options={}) {
 }
 const server = http.createServer(async (req,res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
+  if(u.pathname==='/api/public-hud/status'&&req.method==='GET'){if(!localRequest(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});const info=externalHud.get();if(!info.running&&externalHudGateway.status().running)await externalHudGateway.stop();return json(res,200,info)}
+  if(u.pathname==='/api/public-hud/start'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});try{await externalHudGateway.start();return json(res,200,externalHud.begin())}catch(e){await externalHudGateway.stop();return json(res,500,{error:e.message})}}
+  if(u.pathname==='/api/public-hud/stop'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});externalHud.end();await externalHudGateway.stop();return json(res,200,{ok:true})}
+  if(u.pathname==='/api/lan-hud/status'&&req.method==='GET'){if(!localRequest(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});return json(res,200,lanHud.status())}
+  if(u.pathname==='/api/lan-hud/start'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});try{return json(res,200,await lanHud.start())}catch(e){return json(res,500,{error:'내부 HUD 시작 실패: '+e.message})}}
+  if(u.pathname==='/api/lan-hud/stop'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});return json(res,200,await lanHud.stop())}
   if(u.pathname==='/api/web-draft/public-status'&&req.method==='GET'){
     if(!localRequest(req))return json(res,403,{error:'로컬 진행자 전용입니다.'});
     return json(res,200,publicConnection.get());
@@ -580,14 +591,14 @@ const server = http.createServer(async (req,res) => {
   }
   if (u.pathname === '/api/client-fearless/reset' && req.method === 'POST') {clientFearless.reset(state);save();broadcast();return json(res,200,{ok:true});}
   if (u.pathname === '/api/teams/swap' && req.method === 'POST') {try{swapTeamSides();save();broadcast();return json(res,200,{ok:true})}catch(error){return json(res,409,{ok:false,error:error.message})}}
-  if (u.pathname === '/api/state' && req.method === 'GET') return json(res,200,state);
+  if (u.pathname === '/api/state' && req.method === 'GET') return json(res,200,{...state,serverNow:Date.now()});
   if (u.pathname === '/api/state' && req.method === 'POST') {
     try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});if(typeof patch.game?.autoQuestIcons==='boolean'&&patch.game.autoQuestIcons!==Boolean(state.game.autoQuestIcons))resetQuestIconBaseline();delete patch.webDraft;merge(state,patch);normalizeSideColors();save(); broadcast(); return json(res,200,{ok:true,state}); }
     catch(e) { return json(res,400,{ok:false,error:e.message}); }
   }
   if (u.pathname === '/api/events') {
     res.writeHead(200, {'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'});
-    res.write(`data: ${JSON.stringify(state)}\n\n`); clients.add(res); req.on('close',()=>clients.delete(res)); return;
+    res.write(`data: ${JSON.stringify({...state,serverNow:Date.now()})}\n\n`); clients.add(res); req.on('close',()=>clients.delete(res)); return;
   }
   if (u.pathname === '/api/result-image' && req.method === 'POST') {
     try {

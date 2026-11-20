@@ -179,7 +179,8 @@
       "clock": 17,
       "team": 20
     },
-    "manualGrubs": false
+    "manualGrubs": false,
+    "nativeDragonStacks": false
   },
   "connection": {
     "autoSync": false,
