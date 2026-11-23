@@ -19,7 +19,15 @@ const player = (championId,team,kills,position,questId) => ({
 const live = {
   gameData:{gameTime:120},
   allPlayers:[player(1,'ORDER',3,'TOP',1207),player(2,'ORDER',4,'BOTTOM',1200),player(3,'CHAOS',2,'BOTTOM',1202)],
-  events:{Events:[{EventName:'TurretKilled',KillerTeam:'ORDER',EventTime:100}]}
+  events:{Events:[
+    {EventName:'ChampionKill',KillerTeam:'ORDER',EventTime:97},
+    {EventName:'TurretKilled',KillerTeam:'ORDER',EventTime:100},
+    {EventName:'DragonKill',DragonType:'Mountain',KillerTeam:'CHAOS',EventTime:101},
+    {EventName:'BaronKill',KillerTeam:'CHAOS',EventTime:102},
+    {EventName:'HordeKill',KillerTeam:'ORDER',EventTime:103},
+    {EventName:'HeraldKill',KillerTeam:'ORDER',EventTime:104},
+    {EventName:'TurretKilled',KillerTeam:'CHAOS',EventTime:200}
+  ]}
 };
 let calls=0,now=10000;
 const ctx = {
@@ -40,6 +48,9 @@ vm.runInContext(captureCode+liveCode,ctx);
   assert.equal(calls,1);
   assert.equal(state.game.clock,'02:00');
   assert.equal(state.game.blueTowers,1);
+  assert.equal(state.game.redTowers,0);
+  assert.equal(state.game.blueGrubs,1);
+  assert.deepEqual(Array.from(state.game.resultDragons.red),['Mountain']);
   assert.equal(state.game.blueKills,7);
   assert.equal(state.game.blueBarons,3);
   assert.equal(state.game.redHeralds,1);
@@ -75,7 +86,9 @@ vm.runInContext(captureCode+liveCode,ctx);
   await ctx.syncLeague();
   assert.equal(rows()[3].cs,110);
   assert.equal(state.game.blueBarons,0);
+  assert.equal(state.game.redBarons,1);
   assert.equal(state.game.redHeralds,0);
+  assert.equal(state.game.blueHeralds,1);
   assert.equal(JSON.stringify(state.draft),originalDraft);
 
   let resolve;

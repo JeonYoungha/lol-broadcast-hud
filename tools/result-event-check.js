@@ -1,8 +1,9 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');
-const root={innerHTML:'',querySelector(){return null}};
+const result=require('../public/result-core');
+const root={html:'',writes:0,get innerHTML(){return this.html;},set innerHTML(value){this.html=value;this.writes++;},querySelector(){return null}};
 const context={document:{getElementById:()=>root,body:{style:{}}},location:{search:''},URLSearchParams,console,
  fetch:()=>Promise.reject(new Error('offline')),HUD:{escape:x=>String(x??''),icon:id=>'/icon/'+id,init(fn){this.render=fn}},
- ResultCore:{kda:()=> '1/2/3',snapshot:s=>s.result.snapshot}};
+ ResultCore:result};
 vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/result.js'),'utf8'),context);
 const state={event:{name:'TEST EVENT',round:'FINAL',game:2},blue:{},red:{},result:{snapshot:{event:{name:'OLD',round:'OLD ROUND',game:1},blue:{short:'BLUE'},red:{short:'RED'},game:{clock:'30:00'},draft:{bluePicks:[],redPicks:[],blueBans:[],redBans:[]}}}};
 context.HUD.state=state;context.HUD.render(state);
@@ -21,11 +22,22 @@ state.result.winner='red';context.HUD.render(state);assert(root.innerHTML.includ
 Object.assign(state.result.snapshot.game,{blueBarons:3,redBarons:2,blueHeralds:1,redHeralds:0});context.HUD.render(state);assert(root.innerHTML.includes('aria-label="바론 3회"'));assert(root.innerHTML.includes('aria-label="바론 2회"'));assert(root.innerHTML.includes('aria-label="전령 1회"'));assert(root.innerHTML.includes('<small>HERALDS</small><div>—</div>'));assert.equal((root.innerHTML.match(/result-baron\.png/g)||[]).length,5);assert.equal((root.innerHTML.match(/result-herald\.png/g)||[]).length,1);
 Object.assign(state.result.snapshot.game,{blueGold:'40.5K',redGold:'42.0K',blueTowers:4,redTowers:2,blueGrubs:3,redGrubs:3});context.HUD.render(state);assert(root.innerHTML.includes('<small>GOLD</small><div class="stat-lead red">42.0K'));assert(root.innerHTML.includes('<div class="stat-lead blue">4</div><small>TOWERS</small>'));assert(root.innerHTML.includes('<div>3</div><small>GRUBS</small><div>3</div>'));state.result.snapshot.game.blueGold='—';context.HUD.render(state);assert(!root.innerHTML.includes('<small>GOLD</small><div class="stat-lead red">'));
 delete state.result.snapshot.seriesScorePending;state.event.game=1;state.fearless={active:true,games:[]};state.result.winner='blue';context.HUD.render(state);assert(root.innerHTML.includes('<strong>TEAM_X</strong><b>1</b><em>WIN</em>'));state.fearless.games.push({game:1});context.HUD.render(state);assert(root.innerHTML.includes('<strong>TEAM_X</strong><b>0</b><em>WIN</em>'));
-const result=require('../public/result-core');
 const current={event:{game:1,round:'Final'},game:{matchSerial:1},blue:{},red:{},draft:{}};
 current.result={snapshot:result.snapshot(current)};
 const oldUpload=result.target(current);
 assert(result.isCurrent(current));assert(result.sameTarget(current,oldUpload));
 current.event.game=2;
 assert(!result.isCurrent(current));assert(!result.sameTarget(current,oldUpload));
-console.log('PASS result branding follows controls while saved set, stats and graph target stay together');
+const preview={event:{game:2,round:'Final',name:'Example'},game:{clock:'31:00'},blue:{},red:{},draft:{},
+ result:{goldData:{duration:60,points:[{seconds:0,diff:0},{seconds:60,diff:1500}]}}};
+const beforePreview=root.writes;
+for(let i=0;i<40;i++)context.HUD.render(structuredClone(preview));
+assert.equal(root.writes,beforePreview+1);
+assert(root.innerHTML.includes('결과 저장 전 미리보기'));
+assert(root.innerHTML.includes('id="goldPositive"'));
+const frozen=result.snapshot(preview);
+preview.game.clock='32:00';
+context.HUD.render(preview);
+assert.equal(root.writes,beforePreview+2);assert(root.innerHTML.includes('32:00'));
+assert.equal(frozen.game.clock,'31:00');assert.equal(frozen.matchKey,result.matchKey(preview));assert(Date.parse(frozen.savedAt)>0);
+console.log('PASS stable result preview, uploaded graph, live branding and saved set isolation');

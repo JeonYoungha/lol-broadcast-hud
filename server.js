@@ -85,6 +85,7 @@ const save = () => {
 };
 let lastBroadcast='';
 const broadcast = () => {
+  if (!clients.size) return;
   const signature=JSON.stringify(state);
   if(signature===lastBroadcast)return;
   lastBroadcast=signature;
@@ -490,6 +491,9 @@ function clearMatchObjectives() {
   delete state.game.manualBaronKillAt;
 }
 
+const countedObjectives=new Map([
+  ['TurretKilled','Towers'],['BaronKill','Barons'],['HordeKill','Grubs'],['HeraldKill','Heralds']
+]);
 async function syncLiveGame(webRoom=null) {
   try {
     const live=await liveRequest();
@@ -546,9 +550,8 @@ async function syncLiveGame(webRoom=null) {
       }
     }
     const events=live.events?.Events||[];
-    const counts={blueTowers:0,redTowers:0,blueDragons:0,redDragons:0,blueBarons:0,redBarons:0,blueGrubs:0,redGrubs:0,blueHeralds:0,redHeralds:0};
-    const allDragonTypes=[],resultDragons={blue:[],red:[]},epicKills={blue:0,red:0};
-    let firstBloodSide=null,firstTowerSide=null,epicFeatSide=null;
+    const counts={blueTowers:0,redTowers:0,blueBarons:0,redBarons:0,blueGrubs:0,redGrubs:0,blueHeralds:0,redHeralds:0};
+    const allDragonTypes=[],resultDragons={blue:[],red:[]};
     let lastDragon=null,lastBaron=null;
     const eventSide=e=>{
       const teamHint=String(e.KillerTeam??e.Team??e.KillerTeamID??e.DragonKilledBy??'').toUpperCase();
@@ -577,23 +580,14 @@ async function syncLiveGame(webRoom=null) {
         }
         if (e.EventName==='BaronKill'&&(!lastBaron||eventTime>Number(lastBaron.EventTime||0))) lastBaron=e;
       }
-      const side=eventSide(e); if (!side) continue;
-      if ((e.EventName==='ChampionKill'||e.EventName==='FirstBlood'||e.EventName==='FirstBloodKill')&&!firstBloodSide) firstBloodSide=side;
-      if (e.EventName==='TurretKilled') { counts[side+'Towers']++; if (!firstTowerSide) firstTowerSide=side; }
-      if (e.EventName==='DragonKill') {
-        counts[side+'Dragons']++;
-        if (e.DragonType) resultDragons[side].push(String(e.DragonType));
-      }
-      if (e.EventName==='BaronKill') counts[side+'Barons']++;
-      if (e.EventName==='HordeKill') counts[side+'Grubs']++;
-      if (e.EventName==='HeraldKill') counts[side+'Heralds']++;
-      if (['DragonKill','BaronKill','HordeKill','HeraldKill'].includes(e.EventName)) {
-        epicKills[side]++;
-        if (!epicFeatSide&&epicKills[side]>=3) epicFeatSide=side;
-      }
+      const objective=countedObjectives.get(e.EventName);
+      if (!objective&&e.EventName!=='DragonKill') continue;
+      const side=eventSide(e);
+      if (!side) continue;
+      if (objective) counts[side+objective]++;
+      else if (e.DragonType) resultDragons[side].push(String(e.DragonType));
     }
     const manualGrubs=Boolean(state.game.manualGrubs);
-    delete counts.blueDragons; delete counts.redDragons;
     if(state.game.manualBarons){delete counts.blueBarons;delete counts.redBarons}
     if(state.game.manualHeralds){delete counts.blueHeralds;delete counts.redHeralds}
     if (manualGrubs) { delete counts.blueGrubs; delete counts.redGrubs; }
@@ -876,7 +870,13 @@ const server = http.createServer(async (req,res) => {
   }
   if (u.pathname === '/api/events') {
     res.writeHead(200, {'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'});
-    res.write(`data: ${JSON.stringify({...state,serverNow:Date.now()})}\n\n`); clients.add(res); req.on('close',()=>clients.delete(res)); return;
+    res.write(`data: ${JSON.stringify({...state,serverNow:Date.now()})}\n\n`);
+    clients.add(res);
+    req.on('close',()=>{
+      clients.delete(res);
+      if(!clients.size)lastBroadcast='';
+    });
+    return;
   }
   if (u.pathname === '/api/result-image' && req.method === 'POST') {
     try {

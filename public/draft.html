@@ -13,15 +13,18 @@ function updateBanWaiting(s){
 }
 let lastLayout='';
 let previousLocks=new Map();
-let timerDeadline=0,timerDuration=0,lastServerTimer=null,lastTimerPhase='',lastTimerKey='';
+let timerDeadline=0,timerDuration=0,lastServerTimer=null,lastTimerKey='';
+let drawnTimer,drawnProgress,drawnSeconds,drawnDuration;
 function drawTimer(){
   const timer=app.querySelector('.draft-countdown');if(!timer)return;
   const left=timerDeadline?Math.max(0,(timerDeadline-performance.now())/1000):0;
   const progress=timerDuration>0?Math.min(1,left/timerDuration):0;
-  timer.style.setProperty('--timer-progress',String(progress));
-  timer.setAttribute('aria-valuenow',String(Math.ceil(left)));
-  timer.setAttribute('aria-valuemax',String(timerDuration));
-  if(typeof DraftTeam!=='undefined')DraftTeam.updateClock?.(Math.ceil(left));
+  const seconds=Math.ceil(left),replacement=timer!==drawnTimer;
+  if(replacement||progress!==drawnProgress)timer.style.setProperty('--timer-progress',String(progress));
+  if(replacement||seconds!==drawnSeconds)timer.setAttribute('aria-valuenow',String(seconds));
+  if(replacement||timerDuration!==drawnDuration)timer.setAttribute('aria-valuemax',String(timerDuration));
+  drawnTimer=timer;drawnProgress=progress;drawnSeconds=seconds;drawnDuration=timerDuration;
+  if(typeof DraftTeam!=='undefined')DraftTeam.updateClock?.(seconds);
 }
 function syncTimer(seconds,phase,web=null,clock=null){
   const value=Math.max(0,Number(seconds)||0),now=performance.now();
@@ -34,9 +37,10 @@ function syncTimer(seconds,phase,web=null,clock=null){
   else timerDuration=Math.max(timerDuration,value);
   if(newTurn)timerDeadline=proposed;
   else if(shared||value!==lastServerTimer)timerDeadline=web?.enabled?Math.min(timerDeadline,proposed):proposed;
-  lastServerTimer=value;lastTimerPhase=phase||'';lastTimerKey=key;drawTimer();
+  lastServerTimer=value;lastTimerKey=key;drawTimer();
 }
-setInterval(drawTimer,50);
+setInterval(()=>{if(drawnProgress>0)drawTimer();},50);
+function syncDraftClock(s){syncTimer(s.draft.timer,s.draft.phase,s.webDraft,s.clockSync);}
 const visiblePicks=picks=>(picks||[]).map(p=>({id:p.id,name:p.id?p.name:'',locked:p.locked}));
 function renderDraft(s){
   const nextLocks=new Map(),justLocked=new Set();
@@ -59,9 +63,9 @@ function renderDraft(s){
   previousLocks=nextLocks;
   updateBanWaiting(s);
   const phase=app.querySelector('.phase-time');if(phase)phase.textContent=s.draft.phase||'';
-  syncTimer(s.draft.timer,s.draft.phase,s.webDraft,s.clockSync);
   DraftTeam.render(s);
+  syncDraftClock(s);
 }
 if(new URLSearchParams(location.search).has('preview'))DraftPreview.start(renderDraft);
-else HUD.init(renderDraft);
+else HUD.init(renderDraft,{onClock:syncDraftClock});
 </script></body></html>

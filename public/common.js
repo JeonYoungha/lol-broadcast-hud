@@ -9,17 +9,58 @@ window.HUD = (() => {
   const rune = id => id ? `/api/rune-icon?id=${id}` : '/placeholder.svg';
   const splash = pick => pick?.asset || (pick?.id ? `/api/champion-splash?id=${pick.id}&skin=${pick.skinId||0}` : '/placeholder.svg');
   const escape = value => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  async function init(cb) {
+  function syncClock(target, serverNow, started) {
+    if (!Number.isFinite(serverNow)) return false;
+    const received=performance.now();
+    target.serverNow=serverNow;
+    target.clockSync={serverNow,received,rtt:started===null?0:Math.max(0,received-started)};
+    return true;
+  }
+  async function init(cb,{onClock}={}) {
     if (cb) listeners.push(cb);
     const contact=()=>{
       lastContact=performance.now();
       document.body.classList.remove('disconnected');
     };
     const disconnected=()=>document.body.classList.add('disconnected');
-    const notify=(next,started=null)=>{if(Number.isFinite(next.serverNow)){const received=performance.now(),rtt=started===null?0:Math.max(0,received-started);next.clockSync={serverNow:next.serverNow,received,rtt}}if(next.blue)next.blue.color='#0050d1';if(next.red)next.red.color='#ff4f6d';state=next;for(const fn of listeners){try{fn(state)}catch(error){console.error('HUD render failed',error)}}};
+    const render=(fn)=>{try{fn(state)}catch(error){console.error('HUD render failed',error)}};
+    const notify=(next,started=null)=>{
+      syncClock(next,next.serverNow,started);
+      if(next.blue)next.blue.color='#0050d1';
+      if(next.red)next.red.color='#ff4f6d';
+      state=next;
+      for(const fn of listeners)render(fn);
+    };
     if(!['127.0.0.1','localhost','[::1]'].includes(location.hostname)){
       let last='',timer=null,inFlight=false,urgent=false;
-      async function poll(){if(inFlight){urgent=true;return}inFlight=true;const started=performance.now();let failed=false;try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('HUD 연결 실패');const next=await response.json(),serialized=JSON.stringify(next);contact();if(serialized!==last){last=serialized;notify(next,started)}}catch(error){disconnected();failed=true}finally{inFlight=false;const delay=urgent?0:failed?1500:Math.max(25,250-(performance.now()-started));urgent=false;timer=setTimeout(poll,delay)}}
+      async function poll(){
+        if(inFlight){urgent=true;return}
+        inFlight=true;
+        const started=performance.now();
+        let failed=false;
+        try{
+          const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+          if(!response.ok)throw Error('HUD 연결 실패');
+          const next=await response.json();
+          const {serverNow,...payload}=next;
+          const serialized=JSON.stringify(payload);
+          contact();
+          if(serialized!==last){
+            last=serialized;
+            notify(next,started);
+          }else if(syncClock(state,serverNow,started)&&onClock){
+            render(onClock);
+          }
+        }catch(error){
+          disconnected();
+          failed=true;
+        }finally{
+          inFlight=false;
+          const delay=urgent?0:failed?1500:Math.max(25,250-(performance.now()-started));
+          urgent=false;
+          timer=setTimeout(poll,delay);
+        }
+      }
       refresh=()=>{if(timer!==null)clearTimeout(timer);timer=null;if(inFlight)urgent=true;else poll()};
       poll();return;
     }

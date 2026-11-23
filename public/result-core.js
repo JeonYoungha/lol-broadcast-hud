@@ -24,17 +24,22 @@ const ResultCore = {
     }
     return '';
   },
-  snapshot(s) {
+  view(s) {
     const {lineups,sidePanelRoster,liveFeed,resultDragons,...game}=s.game;
     if(resultDragons) for(const side of ['blue','red']){
       game[side+'DragonTypes']=resultDragons[side]||[];
       game[side+'Dragons']=game[side+'DragonTypes'].length;
     }
     const picks=side=>(lineups?.[side]??s.draft[side+'Picks']??[]).map(p=>({id:p.id,kda:p.kda}));
-    return JSON.parse(JSON.stringify({
-      savedAt:new Date().toISOString(), matchKey:this.matchKey(s),event:s.event, blue:s.blue, red:s.red, game,
+    return {
+      event:s.event, blue:s.blue, red:s.red, game,
       draft:{blueBans:s.draft.blueBans,redBans:s.draft.redBans,
         bluePicks:picks('blue'),redPicks:picks('red')}
+    };
+  },
+  snapshot(s) {
+    return JSON.parse(JSON.stringify({
+      savedAt:new Date().toISOString(), matchKey:this.matchKey(s),...this.view(s)
     }));
   },
   kda(snapshot,side) {

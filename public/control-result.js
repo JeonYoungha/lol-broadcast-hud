@@ -73,11 +73,6 @@ window.ResultControls=(()=>{
    snapshot.game[key]=event.target.type==='number'?Math.max(0,Number(event.target.value)||0):event.target.value;
    try{await update({result:{snapshot}},{capture:!HUD.state.result?.snapshot})}catch(e){status(e.message)}
  });
- function imageData(file){return new Promise((resolve,reject)=>{
-   const source=URL.createObjectURL(file),image=new Image();
-   image.onload=()=>{try{const ratio=Math.min(1,1800/image.naturalWidth,1400/image.naturalHeight),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*ratio));canvas.height=Math.max(1,Math.round(image.naturalHeight*ratio));const context=canvas.getContext('2d');context.fillStyle='#191827';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',.94))}catch(e){reject(e)}finally{URL.revokeObjectURL(source)}};
-   image.onerror=()=>{URL.revokeObjectURL(source);reject(Error('이미지를 읽을 수 없어요. PNG 또는 JPG로 다시 선택해주세요.'))};image.src=source;
- })}
  byId('resultDamageFile').onchange=async()=>{
    const file=byId('resultDamageFile').files[0];if(!file)return;
    if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>25*1024*1024){status('PNG/JPG/WebP 이미지(25MB 이하)를 선택해주세요.');return}
@@ -86,7 +81,7 @@ window.ResultControls=(()=>{
  let winnerTarget='';
  function render(s){
    if(!s)return;
-   const result=s.result||{},snapshot=result.snapshot||ResultCore.snapshot(s);
+   const result=s.result||{},snapshot=result.snapshot||ResultCore.view(s);
    const gd=result.goldData;if(gd){
     const seconds=Math.round(gd.durationOverride||gd.duration);
     if(document.activeElement!==byId('goldGraphDuration'))byId('goldGraphDuration').value=Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');

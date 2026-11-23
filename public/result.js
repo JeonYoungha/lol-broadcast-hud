@@ -16,7 +16,7 @@ const goldValue=value=>{const m=String(value??'').trim().replace(/,/g,'').match(
 const kdaValue=value=>{const m=String(value??'').match(/^\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)\s*$/);return m?(Number(m[1])+Number(m[3]))/Math.max(1,Number(m[2])):null};
 const countValue=value=>value===null||value===undefined||value===''?null:Number.isFinite(Number(value))?Number(value):null;
 const row=(label,blue,red,blueValue=null,redValue=null)=>{const comparable=Number.isFinite(blueValue)&&Number.isFinite(redValue),blueLead=comparable&&blueValue>redValue,redLead=comparable&&redValue>blueValue;return '<div class="result-stat'+(label==='K / D / A'?' result-stat-kda':'')+'"><div'+(blueLead?' class="stat-lead blue"':'')+'>'+blue+'</div><small>'+label+'</small><div'+(redLead?' class="stat-lead red"':'')+'>'+red+'</div></div>'};
-function goldGraph(history=[],uploaded=HUD.state?.result?.goldData){
+function goldGraph(history=[],uploaded){
  const points=uploaded?.points?.length?uploaded.points.filter(p=>Number.isFinite(p.seconds)&&Number.isFinite(p.diff)).map(p=>({seconds:p.seconds*(uploaded.durationOverride>0?uploaded.durationOverride/uploaded.duration:1),blue:p.diff*(uploaded.invert?-1:1)*(uploaded.goldPerGridOverride>0?uploaded.goldPerGridOverride/2000:1),red:0})):history.filter(p=>Number.isFinite(p.seconds)&&Number.isFinite(p.blue)&&Number.isFinite(p.red));
  if(points.length<2)return '<div class="no-history">경기 중 기록된 골드 데이터가 없습니다</div>';
  const w=780,h=142,x0=50,y0=8,maxTime=Math.max(1,...points.map(p=>p.seconds)),upper=Math.max(1000,Math.ceil(Math.max(0,...points.map(p=>p.blue-p.red))/1000)*1000),lower=Math.min(0,Math.floor(Math.min(0,...points.map(p=>p.blue-p.red))/1000)*1000);
@@ -41,7 +41,7 @@ function damageGraph(data,snapshot){
 let signature='';
 function renderResult(s){
  if(!s)return;
- const result=s.result||{},snapshot=result.snapshot||ResultCore.snapshot(s);
+ const result=s.result||{},snapshot=result.snapshot||ResultCore.view(s);
  const currentEvent={...s.event,...snapshot.event,name:s.event?.name??snapshot.event?.name,logo:s.event?.logo??snapshot.event?.logo};
  const sig=JSON.stringify({result,previewSnapshot:result.snapshot?undefined:snapshot,currentEvent,currentTeams:{blue:s.blue,red:s.red},legacySeries:result.snapshot?.seriesScorePending===undefined?{active:s.fearless?.active,games:s.fearless?.games?.map(game=>game.game)}:undefined});if(sig===signature)return;signature=sig;
  const g=snapshot.game,winner=result.winner||'',
@@ -61,7 +61,7 @@ function renderResult(s){
  row('ELDERS',drakes(Array.from({length:blueElders},()=>'Elder')),drakes(Array.from({length:redElders},()=>'Elder')),blueElders,redElders)+
  row('BARONS',objectiveIcons(g.blueBarons,'baron'),objectiveIcons(g.redBarons,'baron'),countValue(g.blueBarons),countValue(g.redBarons))+
  row('BANS',bans(snapshot.draft.blueBans),bans(snapshot.draft.redBans))+
- '</section><section><h2 class="result-title">TOTAL DAMAGE TO CHAMPIONS</h2><div class="result-damage">'+damageGraph(result.damageData,snapshot)+'</div><div class="result-gold"><h2 class="result-title">GOLD DIFFERENCE</h2>'+goldGraph(g.goldHistory)+'</div></section></div><footer class="result-footer"><span class="result-event-brand">'+(safeImage(currentEvent.logo)?'<img src="'+esc(safeImage(currentEvent.logo))+'" alt="">':'')+esc(currentEvent.name)+'</span><span>'+esc(currentEvent.round)+' · GAME '+esc(currentEvent.game)+'</span></footer>'+(result.snapshot?'':'<div class="result-pending">결과 저장 전 미리보기</div>');
+ '</section><section><h2 class="result-title">TOTAL DAMAGE TO CHAMPIONS</h2><div class="result-damage">'+damageGraph(result.damageData,snapshot)+'</div><div class="result-gold"><h2 class="result-title">GOLD DIFFERENCE</h2>'+goldGraph(g.goldHistory,result.goldData)+'</div></section></div><footer class="result-footer"><span class="result-event-brand">'+(safeImage(currentEvent.logo)?'<img src="'+esc(safeImage(currentEvent.logo))+'" alt="">':'')+esc(currentEvent.name)+'</span><span>'+esc(currentEvent.round)+' · GAME '+esc(currentEvent.game)+'</span></footer>'+(result.snapshot?'':'<div class="result-pending">결과 저장 전 미리보기</div>');
  root.querySelector('.result-gold svg')?.setAttribute('preserveAspectRatio','none');
 }
 fetch('/api/champion-list?lang=en').then(r=>r.json()).then(list=>{

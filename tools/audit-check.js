@@ -14,6 +14,35 @@ check('broadcast does not repeat unchanged state',()=>{
  vm.runInContext('broadcast();broadcast();broadcast()',c);assert.equal(writes,1);
  c.state.game.clock='00:01';vm.runInContext('broadcast()',c);assert.equal(writes,2);
 });
+check('SSE skips serialization without subscribers and broadcasts after reconnect',()=>{
+ const clients=new Set(),state={game:{clock:'00:00'}};
+ let serializations=0;
+ const c=isolate("let lastBroadcast=",'const goldText',{state,clients,JSON:{stringify(value){serializations++;return JSON.stringify(value);}}});
+ const route=server.slice(server.indexOf("  if (u.pathname === '/api/events')"),server.indexOf("  if (u.pathname === '/api/result-image'"));
+ const subscribe=vm.runInContext('(req,res,u)=>{'+route+'}',c);
+ const broadcast=()=>vm.runInContext('broadcast()',c);
+ function listen(){
+  const messages=[];
+  let close;
+  subscribe({on(event,fn){assert.equal(event,'close');close=fn;}},
+    {writeHead(){},write(frame){messages.push(JSON.parse(frame.slice(6)));}},
+    {pathname:'/api/events'});
+  return {messages,close};
+ }
+ const first=listen();
+ broadcast();first.close();assert.equal(clients.size,0);
+ const before=serializations;
+ state.game.clock='00:01';broadcast();broadcast();
+ assert.equal(serializations,before);
+ const second=listen();
+ assert.equal(second.messages[0].game.clock,'00:01');
+ state.game.clock='00:00';broadcast();
+ assert.equal(second.messages.at(-1).game.clock,'00:00');
+ state.game.clock='00:02';
+ const third=listen();broadcast();
+ assert.equal(second.messages.at(-1).game.clock,'00:02');
+ assert.equal(third.messages[0].game.clock,'00:02');
+});
 check('incomplete role quest is not complete',()=>{
  const c=isolate('function roleQuestSignal','const spellKey');
  assert.equal(c.roleQuestSignal({roleQuest:{status:'incomplete'}}),false);
