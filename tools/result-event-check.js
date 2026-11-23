@@ -4,11 +4,11 @@ const context={document:{getElementById:()=>root,body:{style:{}}},location:{sear
  fetch:()=>Promise.reject(new Error('offline')),HUD:{escape:x=>String(x??''),icon:id=>'/icon/'+id,init(fn){this.render=fn}},
  ResultCore:{kda:()=> '1/2/3',snapshot:s=>s.result.snapshot}};
 vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/result.js'),'utf8'),context);
-const state={event:{name:'SFL',round:'FINAL',game:2},blue:{},red:{},result:{snapshot:{event:{name:'OLD',round:'OLD ROUND',game:1},blue:{short:'BLUE'},red:{short:'RED'},game:{clock:'30:00'},draft:{bluePicks:[],redPicks:[],blueBans:[],redBans:[]}}}};
+const state={event:{name:'TEST EVENT',round:'FINAL',game:2},blue:{},red:{},result:{snapshot:{event:{name:'OLD',round:'OLD ROUND',game:1},blue:{short:'BLUE'},red:{short:'RED'},game:{clock:'30:00'},draft:{bluePicks:[],redPicks:[],blueBans:[],redBans:[]}}}};
 context.HUD.state=state;context.HUD.render(state);
-assert(root.innerHTML.includes('SFL'));assert(root.innerHTML.includes('FINAL · GAME 2'));assert(!root.innerHTML.includes('OLD ROUND'));assert(root.innerHTML.includes('30:00'));
+assert(root.innerHTML.includes('TEST EVENT'));assert(root.innerHTML.includes('OLD ROUND · GAME 1'));assert(!root.innerHTML.includes('GAME 2'));assert(root.innerHTML.includes('30:00'));
 state.event={name:'NEW EVENT',round:'FINAL 2',game:3};context.HUD.render(state);
-assert(root.innerHTML.includes('NEW EVENT'));assert(root.innerHTML.includes('FINAL 2 · GAME 3'));assert(root.innerHTML.includes('30:00'));
+assert(root.innerHTML.includes('NEW EVENT'));assert(root.innerHTML.includes('OLD ROUND · GAME 1'));assert(!root.innerHTML.includes('GAME 3'));assert(root.innerHTML.includes('30:00'));
 state.result.snapshot.blue={name:'Team A',short:'A',logo:'/old-a.png'};state.result.snapshot.red={name:'Team B',short:'B',logo:'/old-b.png'};
 state.blue={name:'Team B',short:'B',logo:'/new-b.png'};state.red={name:'Team A',short:'A',logo:'/new-a.png'};state.event.logo='/event-logo.png';context.HUD.render(state);
 assert(root.innerHTML.includes('/event-logo.png'));assert(root.innerHTML.indexOf('/new-a.png')<root.innerHTML.indexOf('/new-b.png'));assert(!root.innerHTML.includes('/old-a.png'));
@@ -21,4 +21,11 @@ state.result.winner='red';context.HUD.render(state);assert(root.innerHTML.includ
 Object.assign(state.result.snapshot.game,{blueBarons:3,redBarons:2,blueHeralds:1,redHeralds:0});context.HUD.render(state);assert(root.innerHTML.includes('aria-label="바론 3회"'));assert(root.innerHTML.includes('aria-label="바론 2회"'));assert(root.innerHTML.includes('aria-label="전령 1회"'));assert(root.innerHTML.includes('<small>HERALDS</small><div>—</div>'));assert.equal((root.innerHTML.match(/result-baron\.png/g)||[]).length,5);assert.equal((root.innerHTML.match(/result-herald\.png/g)||[]).length,1);
 Object.assign(state.result.snapshot.game,{blueGold:'40.5K',redGold:'42.0K',blueTowers:4,redTowers:2,blueGrubs:3,redGrubs:3});context.HUD.render(state);assert(root.innerHTML.includes('<small>GOLD</small><div class="stat-lead red">42.0K'));assert(root.innerHTML.includes('<div class="stat-lead blue">4</div><small>TOWERS</small>'));assert(root.innerHTML.includes('<div>3</div><small>GRUBS</small><div>3</div>'));state.result.snapshot.game.blueGold='—';context.HUD.render(state);assert(!root.innerHTML.includes('<small>GOLD</small><div class="stat-lead red">'));
 delete state.result.snapshot.seriesScorePending;state.event.game=1;state.fearless={active:true,games:[]};state.result.winner='blue';context.HUD.render(state);assert(root.innerHTML.includes('<strong>TEAM_X</strong><b>1</b><em>WIN</em>'));state.fearless.games.push({game:1});context.HUD.render(state);assert(root.innerHTML.includes('<strong>TEAM_X</strong><b>0</b><em>WIN</em>'));
-console.log('PASS result displays live event settings while preserving saved game stats');
+const result=require('../public/result-core');
+const current={event:{game:1,round:'Final'},game:{matchSerial:1},blue:{},red:{},draft:{}};
+current.result={snapshot:result.snapshot(current)};
+const oldUpload=result.target(current);
+assert(result.isCurrent(current));assert(result.sameTarget(current,oldUpload));
+current.event.game=2;
+assert(!result.isCurrent(current));assert(!result.sameTarget(current,oldUpload));
+console.log('PASS result branding follows controls while saved set, stats and graph target stay together');

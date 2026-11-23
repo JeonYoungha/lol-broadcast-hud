@@ -10,7 +10,7 @@ window.ResultCapture=(()=>{
  document.head.appendChild(style);
  style.textContent+='.capture-dialog [hidden]{display:none!important}.capture-dialog input{max-width:100%}';
  const get=id=>dialog.querySelector('#'+id),canvas=get('cropCanvas'),context=canvas.getContext('2d');
- let image=null,rect=null,start=null,pending=null,busy=false,champions=[],onApply=null,token=0,graphType='damage';
+ let image=null,rect=null,start=null,pending=null,busy=false,champions=[],onApply=null,token=0,graphType='damage',target=null;
  function status(message){get('cropStatus').textContent=message}
  function invalidate(){pending=null;get('cropApply').disabled=true;get('cropReview').innerHTML=''}
  function draw(){
@@ -59,17 +59,24 @@ window.ResultCapture=(()=>{
  get('cropApply').onclick=async()=>{
   if(get('cropApply').disabled)return;busy=true;check();status('결과창에 적용 중…');
   try{
+   if(!ResultCore.sameTarget(HUD.state,target))throw Error('세트나 저장 결과가 바뀌었습니다. 현재 세트의 그래프를 다시 열어주세요.');
    const data=structuredClone(pending.data);let result;
    if(graphType==='gold'){data.estimated=true;result={goldImage:pending.url,goldData:data};}
    else{data.missingCount=0;data.warning='';data.estimated=['blue','red'].some(side=>data[side].some(p=>p.estimated));result={damageImage:pending.url,damageData:data,damageAnalysisError:''};}
    if(!HUD.state.result?.snapshot)result.snapshot=ResultCore.snapshot(HUD.state);
-   const response=await HUD.update({result});if(!response.ok)throw Error(response.error||'저장 실패');
+   const response=await HUD.update({result,resultGuard:target});if(!response.ok)throw Error(response.error||'저장 실패');
    onApply?.(graphType==='gold'?'확인한 골드 차이 그래프를 결과창에 적용했어요. (이미지 복원 근사치)':'확인한 딜량 10명을 결과창에 적용했어요.');dialog.close();
   }catch(e){status(e.message)}finally{busy=false;check()}
  };
  get('cropClose').onclick=()=>{if(!busy)dialog.close()};
  dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});dialog.addEventListener('close',()=>{token++;start=null;invalidate()});
  async function open(file,options={}){
+  const state=HUD.state;
+  if(!state)throw Error('HUD가 연결된 뒤 이미지를 올려주세요.');
+  const issue=ResultCore.captureIssue(state);
+  if(issue)throw Error(issue);
+  if(state.result?.snapshot&&!ResultCore.isCurrent(state))throw Error('현재 세트 결과를 먼저 저장하세요.');
+  target=ResultCore.target(state);
   if(busy)return;token++;const current=token;graphType=options.graphType==='gold'?'gold':'damage';image=null;rect=null;start=null;context.clearRect(0,0,canvas.width,canvas.height);get('cropRead').disabled=true;champions=options.champions||[];onApply=options.onApply;invalidate();
   get('captureTitle').textContent=graphType==='gold'?'골드 차이 캡처 영역 선택':'딜량 캡처 영역 선택';get('captureSteps').textContent=graphType==='gold'?'① 축까지 포함해 영역 선택 → ② 그래프 인식 → ③ 미리보기 확인 후 적용':'① 이미지에서 드래그해 영역 선택 → ② 숫자 읽기 → ③ 10명 확인 후 적용';get('captureGuide').innerHTML=graphType==='gold'?goldGuide:damageGuide;goldOptions.hidden=graphType!=='gold';get('cropGoldDuration').value='';get('cropGoldGrid').value=options.goldPerGrid||2000;get('cropGoldInvert').checked=!!options.invert;get('cropRead').textContent=graphType==='gold'?'선택 영역 그래프 인식':'선택 영역 숫자 읽기';canvas.setAttribute('aria-label',graphType==='gold'?'골드 그래프 영역 선택':'딜량 영역 선택');status('이미지를 불러오는 중…');dialog.showModal();
   try{

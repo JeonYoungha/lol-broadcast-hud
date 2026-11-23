@@ -9,7 +9,10 @@ command('blue','ready');command('red','ready');assert.equal(state.webDraft.actio
 assert.throws(()=>command('red','hover',{id:1}));
 assert.throws(()=>command('blue','skip'));assert.equal(state.webDraft.step,0);
 command('blue','hover',{id:99});time+=11000;engine.tick();assert.equal(state.draft.blueBans[0],0);assert(state.webDraft.notice.includes('밴 없음'));assert.equal(state.webDraft.hover,0);
-command('red','hover',{id:1});command('red','lock');assert.equal(state.draft.redBans[0],1);
+command('red','hover',{id:97});
+assert.throws(()=>command('red','lock'));
+assert.equal(command('red','lock',{id:1}).locked.id,1);
+assert.equal(state.draft.redBans[0],1);
 assert.equal(state.webDraft.action.slot,1);assert.throws(()=>command('blue','hover',{id:1}));
 while(state.webDraft.step<6){time+=11000;engine.tick()}
 assert.equal(state.webDraft.action.type,'pick');
@@ -23,7 +26,10 @@ assert.equal(state.webDraft.status,'finished');for(const side of ['blue','red'])
 const all=[...state.draft.bluePicks,...state.draft.redPicks].map(p=>p.id);assert.equal(new Set(all).size,10);assert(!all.includes(1));
 const first=state.draft.bluePicks[0].id;command('blue','swap',{from:0,to:4});assert.equal(state.draft.bluePicks[4].id,first);
 assert.throws(()=>command('blue','swap',{from:0,to:4,fromId:first,toId:first}));
-assert.equal(state.draft.timer,40);time+=39000;engine.tick();assert.equal(state.draft.timer,1);command('red','swap',{from:0,to:4});time+=1000;assert.throws(()=>command('blue','swap',{from:0,to:4}));assert.equal(state.webDraft.status,'complete');assert.equal(state.draft.timer,0);
+assert.equal(state.draft.timer,40);time+=39000;engine.tick();assert.equal(state.draft.timer,1);
+const swapRestart=createEngine(state,options);assert.equal(state.webDraft.status,'paused');
+time+=20000;swapRestart.admin('resume');assert.equal(state.draft.timer,1);
+command('red','swap',{from:0,to:4});time+=1000;assert.throws(()=>command('blue','swap',{from:0,to:4}));assert.equal(state.webDraft.status,'complete');assert.equal(state.draft.timer,0);
 const oldRoom=state.webDraft.room;engine.create();assert.throws(()=>engine.command('blue',{room:oldRoom,action:'ready'}));
 command('blue','ready');command('red','ready');const restored=createEngine(state,options);assert.equal(state.webDraft.status,'paused');restored.admin('resume');restored.admin('close');assert.equal(state.webDraft.enabled,false);
 assert.equal(ORDER.length,20);console.log('PASS web draft: order, permissions, skip slots, hover, random timeout, uniqueness, pause, swaps, stale commands, restart');

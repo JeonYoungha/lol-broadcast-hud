@@ -15,10 +15,20 @@ assert.throws(()=>engine.nextSet({winner:'blue',rofsSide:'blue',category:'side',
 engine.nextSet({winner:'blue',rofsSide:'red',category:'pick',selection:'first',opponent:'red'});
 assert.equal(state.fearless.games.length,1);assert.deepEqual(state.fearless.games[0].picks,firstPicks);assert.equal(state.event.game,2);assert.equal(state.blue.name,'A');assert.equal(state.webDraft.firstSide,'blue');
 assert.equal(state.blue.color,'#0050d1');assert.equal(state.red.color,'#ff4f6d');assert.equal(state.red.score,1);assert.equal(state.red.logo,'b.png');
+send('blue','ready');
 engine.undoSet();assert.equal(state.fearless.games.length,0);assert.equal(state.event.game,1);assert.equal(state.blue.name,'B');assert.equal(state.blue.score,0);assert.equal(state.webDraft.status,'complete');
 assert.equal(state.blue.color,'#0050d1');assert.equal(state.red.color,'#ff4f6d');
 engine.nextSet({winner:'blue',rofsSide:'red',category:'pick',selection:'first',opponent:'red'});
+send('blue','ready');send('blue','unready');assert.equal(state.webDraft.ready.blue,false);
 send('blue','ready');send('red','ready');assert.throws(()=>send('blue','hover',{id:firstPicks[0]}));
+const secondRoom=state.webDraft.room;
+engine.admin('close');
+assert.equal(state.webDraft.status,'suspended');
+assert.throws(()=>engine.undoSet());
+now+=70000;
+engine.admin('resume');
+assert.equal(state.webDraft.status,'running');assert.equal(state.draft.timer,10);assert.equal(state.webDraft.room,secondRoom);
+assert.equal(state.fearless.games.length,1);
 while(state.webDraft.status==='running'){now+=11000;engine.tick()}
 const secondPicks=['blue','red'].flatMap(side=>state.draft[side+'Picks'].map(p=>p.id));assert(secondPicks.every(id=>!firstPicks.includes(id)));
 now+=40000;engine.tick();engine.nextSet({winner:'red',rofsSide:'blue',category:'side',selection:'blue',opponent:'first'});assert.equal(state.fearless.games.length,2);assert.equal(state.event.game,3);

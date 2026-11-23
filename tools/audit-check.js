@@ -28,8 +28,8 @@ check('gold history samples every five game seconds',()=>{
  c.state.game.clock='00:20';c.recordGoldHistory(1500,1300);c.state.game.clock='00:00';c.recordGoldHistory(500,500);assert.equal(c.state.game.goldHistory.length,1);
 });
 check('CS holds the last OCR value',()=>{
- const c=isolate('function latestScreenCs','function clearGoldOcr',{csCells:{blue:[{value:123,at:0}],red:[]}});
- assert.equal(c.latestScreenCs('blue',0),123);assert.equal(c.latestScreenCs('red',0),null);
+ const c=isolate('function latestScreenCs','function clearGoldOcr',{csCells:{blue:new Map([[266,{value:123}]]),red:new Map()}});
+ assert.equal(c.latestScreenCs('blue',266),123);assert.equal(c.latestScreenCs('red',266),null);
 });
 check('manual player names are never assigned by server sync',()=>assert(!/state\[side\]\.players\s*=/.test(server)));
 check('gold SVG handles positive, negative, missing and zero crossing',()=>{
@@ -78,8 +78,17 @@ check('all JavaScript and inline page scripts parse',()=>{
  }
 });
 async function reconnect(){
- const c={window:{},location:{hostname:'127.0.0.1'},document:{body:{classList:{add(){},remove(){}}}},fetch:async()=>{throw Error('temporary offline')},console:{error(){},warn(){}},EventSource:class {constructor(){c.stream=this}}};
+ let now=0,watch,disconnected=false;
+ const c={window:{},location:{hostname:'127.0.0.1'},performance:{now:()=>now},setInterval:fn=>{watch=fn;},
+  document:{body:{classList:{add(){disconnected=true;},remove(){disconnected=false;}}}},
+  fetch:async()=>{throw Error('temporary offline')},console:{error(){},warn(){}},
+  EventSource:class {constructor(){c.stream=this;}addEventListener(name,fn){this[name]=fn;}}};
  vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(root,'public/common.js'),'utf8'),c);
- let calls=0;await c.window.HUD.init(()=>calls++);assert(c.stream);c.stream.onmessage({data:'{"game":{"clock":"00:10"}}'});assert.equal(c.window.HUD.state.game.clock,'00:10');assert.equal(calls,1);passed++;console.log('PASS page reconnects even if initial fetch failed');
+ let calls=0;await c.window.HUD.init(()=>calls++);assert(c.stream);assert(disconnected);
+ c.stream.onmessage({data:'{"game":{"clock":"00:10"}}'});
+ assert.equal(c.window.HUD.state.game.clock,'00:10');assert.equal(calls,1);assert(!disconnected);
+ c.stream.heartbeat();now=7000;watch();assert(disconnected);
+ c.stream.heartbeat();assert(!disconnected);assert.equal(calls,1);
+ passed++;console.log('PASS page reconnects after failure and marks a silent event stream disconnected');
 }
 reconnect().then(()=>console.log('TOTAL '+passed+' checks passed')).catch(e=>{console.error(e);process.exitCode=1});

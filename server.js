@@ -10,12 +10,14 @@ const clientFearless = require('./tools/client-fearless');
 const {createTracker:createQuestIconTracker} = require('./tools/quest-icon-tracker');
 const { createPublicControl } = require('./tools/public-draft-control');
 const { createLanHud } = require('./tools/lan-hud');
+const { ROLES, assignLineup, matchScoreboardRows, selectScreenCs } = require('./tools/live-lineup');
+const ResultCore = require('./public/result-core');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const publicConnection=createPublicControl(ROOT);
 const STATE_FILE = path.join(ROOT, 'data', 'state.json');
-if (!fs.existsSync(STATE_FILE)) fs.copyFileSync(path.join(ROOT, 'data', 'state.example.json'), STATE_FILE);
+if(!fs.existsSync(STATE_FILE))fs.copyFileSync(path.join(ROOT,'data','state.example.json'),STATE_FILE);
 const DDRAGON_ROOT = path.join(ROOT, 'data', 'ddragon');
 const PORT = Number(process.env.HUD_TEST_PORT || process.env.PORT || 3197);
 let state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -24,8 +26,9 @@ const externalHudGateway=createLanHud({originPort:PORT,listenPort:3202,bindHost:
 const externalHud=createPublicControl(ROOT,{statusFile:'public-hud.json',script:'tools/start-public-hud.js'});
 function normalizeSideColors(){if(state.blue)state.blue.color='#0050d1';if(state.red)state.red.color='#ff4f6d'}
 normalizeSideColors();
+if (state.game?.liveFeed?.lastAt) state.game.liveFeed.status=state.connection?.autoSync?'stale':'idle';
 if(state.game?.autoQuestIcons)state.game.questIconStatus='인식 프로그램 응답 대기 중';
-function swapTeamSides(){const w=state.webDraft;if(w?.enabled&&(['running','paused','finished'].includes(w.status)||(w.status==='lobby'&&(w.ready?.blue||w.ready?.red))))throw Error('웹 밴픽 준비 또는 진행 중에는 팀을 교체할 수 없습니다. 세트 사이에 교체하세요.');[state.blue,state.red]=[state.red,state.blue];normalizeSideColors()}
+function swapTeamSides(){const w=state.webDraft;if(w?.enabled&&(['running','paused','suspended','finished'].includes(w.status)||(w.status==='lobby'&&(w.ready?.blue||w.ready?.red))))throw Error('웹 밴픽 준비 또는 진행 중에는 팀을 교체할 수 없습니다. 세트 사이에 교체하세요.');[state.blue,state.red]=[state.red,state.blue];normalizeSideColors()}
 let clients = new Set();
 let lcu = null;
 let championMap = new Map();
@@ -43,6 +46,35 @@ const webDraft=createEngine(state,{championName:id=>championMap.get(id),champion
 const localRequest=req=>['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)&&/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(req.headers.host||'');
 function sameOrigin(req){if(!req.headers.origin)return true;try{return new URL(req.headers.origin).host===req.headers.host}catch(_){return false}}
 function teamFor(req){const token=String(req.headers.authorization||'').replace(/^Bearer /,'');if(!/^[a-f0-9]{48}$/.test(token))return;return ['blue','red'].find(side=>typeof webAccess[side]==='string'&&token.length===webAccess[side].length&&crypto.timingSafeEqual(Buffer.from(token),Buffer.from(webAccess[side])))}
+function draftLinks() {
+  const room=state.webDraft?.room;
+  const links={};
+  if(state.webDraft?.enabled&&room) for(const side of ['blue','red']) {
+    if(/^[a-f0-9]{48}$/.test(webAccess[side]||'')) links[side]=`/draft.html?team=${side}&room=${encodeURIComponent(room)}#${webAccess[side]}`;
+  }
+  return {ok:true,room,links};
+}
+let externalHudAction=null;
+let externalGatewayStart=null;
+function ensureExternalGateway() {
+  if(!externalGatewayStart) {
+    externalGatewayStart=externalHudGateway.start().finally(()=>{externalGatewayStart=null;});
+  }
+  return externalGatewayStart;
+}
+async function externalHudStatus() {
+  let info=externalHud.get();
+  if(!externalHudAction&&info.running&&!info.stopping) {
+    try {
+      await ensureExternalGateway();
+      info=externalHud.get();
+    } catch(error) {
+      return {...info,url:'',ready:false,error:'외부 HUD 연결 복구 실패 · '+error.message};
+    }
+  } else if(!externalHudAction&&!info.running) await externalHudGateway.stop();
+  const ready=info.ready&&externalHudGateway.status().running&&externalHudAction!=='stop';
+  return {...info,ready,url:ready?info.url:''};
+}
 fs.mkdirSync(DDRAGON_ROOT, { recursive:true });
 
 const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.webp':'image/webp', '.json':'application/json; charset=utf-8' };
@@ -71,11 +103,15 @@ function recordGoldHistory(blue,red) {
   if (history.length>2400) history.splice(0,history.length-2400);
 }
 let goldCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
-let csCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
-let apiCsCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
+let csCells={blue:new Map(),red:new Map()};
+let pendingCs={blue:new Map(),red:new Map()};
+let goldByChampion={blue:new Map(),red:new Map()};
+let livePlayers={blue:[],red:[]};
+let observedRoles={blue:new Map(),red:new Map()};
+let ocrResetAt=0;
 let screenGrubCounts={blue:null,red:null};
 let pendingGrubCounts={blue:null,red:null};
-let lastLiveSeconds=null;
+let lastLiveSeconds=state.liveMatch?.seconds??null;
 const questIconTracker=createQuestIconTracker();
 let autoQuestDetected={blue:{},red:{}};
 function resetQuestIconBaseline(){questIconTracker.reset();autoQuestDetected={blue:{},red:{}}}
@@ -84,20 +120,27 @@ function applyQuestIconSamples(data){
  if(!state.game.autoQuestIcons)return;
  if(data?.questIconCapture!=='active'){setQuestIconStatus(data?.questIconCapture==='not-visible'?'대기 중 · 롤 선수 패널이 화면에 보이도록 해주세요':'대기 중 · 롤 게임 화면을 찾지 못했습니다');return}
  if(lastLiveSeconds===null||!data?.questIcons){setQuestIconStatus('대기 중 · 인게임 데이터 연결이 필요합니다');return}
- const dead=Object.fromEntries(['blue','red'].map(side=>[side,(state.draft[side+'Picks']||[]).map(p=>Boolean(p.isDead))]));
+ const roster=state.game.sidePanelRoster||{};
+ const dead=Object.fromEntries(['blue','red'].map(side=>[side,livePlayers[side].map(({player})=>Boolean(player.isDead))]));
  const completed=Object.fromEntries(['blue','red'].map(side=>[side,state.game[side+'RoleQuests']||{}]));
- const changes=questIconTracker.read(data.questIcons,dead,completed);const after=questIconTracker.status();setQuestIconStatus(`인식 중 · 기준 아이콘 ${after.baselines}/10개`);
+ const changes=questIconTracker.read(data.questIcons,dead,completed,roster);const after=questIconTracker.status();setQuestIconStatus(`인식 중 · 기준 아이콘 ${after.baselines}/10개`);
  if(!changes.length)return;
- for(const {side,role} of changes){state.game[side+'RoleQuests']||={};state.game[side+'RoleQuests'][role]=true;autoQuestDetected[side][role]=true}
+ for(const {side,role,id} of changes){
+  state.game[side+'RoleQuests']||={};
+  state.game[side+'RoleQuests'][role]=true;
+  if(id) autoQuestDetected[side][id]=role;
+ }
  save();broadcast();
 }
-function latestScreenCs(side,index) {
-  const cell=csCells[side]?.[index];
-  return cell?cell.value:null;
+function latestScreenCs(side,championId) {
+  return csCells[side].get(championId)?.value ?? null;
 }
 function clearGoldOcr() {
+  ocrResetAt=Date.now();
   goldCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
-  csCells={blue:Array(5).fill(null),red:Array(5).fill(null)};
+  csCells={blue:new Map(),red:new Map()};
+  pendingCs={blue:new Map(),red:new Map()};
+  goldByChampion={blue:new Map(),red:new Map()};
   screenGrubCounts={blue:null,red:null};
   pendingGrubCounts={blue:null,red:null};
   if (!state.game.screenGoldOcr) return;
@@ -110,7 +153,7 @@ clearGoldOcr();
 function applyGoldOcr(data) {
   if (!state.game.screenGoldOcr) return;
   const now=Date.now();
-  const expected=side=>Math.max(1,Math.min(5,(state.draft[side+'Picks']||[]).length||5));
+  const expected=side=>Math.max(1,Math.min(5,livePlayers[side].length||(state.draft[side+'Picks']||[]).length||5));
   for (const side of ['blue','red']) {
     const grubs=data?.[side+'Grubs'];
     if (!state.game.manualGrubs&&Number.isInteger(grubs)&&grubs>=0&&grubs<=6) {
@@ -121,18 +164,33 @@ function applyGoldOcr(data) {
         state.game[side+'Grubs']=grubs;
       }
     }
-    const latest=Array.isArray(data?.[side])?data[side]:[];
-    for (let i=0;i<5;i++) if (Number.isFinite(latest[i])&&latest[i]>=0&&latest[i]<100000) goldCells[side][i]={value:latest[i],at:now};
-    const latestCs=Array.isArray(data?.[side+'Cs'])?data[side+'Cs']:[];
-    const zoomCs=Array.isArray(data?.[side+'CsZoom'])?data[side+'CsZoom']:[];
+    const zoom=data?.[side+'CsZoom']||[],raw=data?.[side+'Cs']||[];
+    const agreed=Array.from({length:5},(_,i)=>Number.isInteger(zoom[i])&&zoom[i]===raw[i]?raw[i]:null);
+    const players=livePlayers[side].map(entry=>({...entry,lastCs:latestScreenCs(side,entry.id)}));
+    const rows=matchScoreboardRows(players,data?.[side+'Kda'],agreed);
+    const lineup=state.game.lineups?.[side]||[];
+    const seen=new Set();
     for (let i=0;i<5;i++) {
-      const apiCs=apiCsCells[side][i];
-      const valid=value=>Number.isInteger(value)&&value>=0&&value<=2000&&(!Number.isFinite(apiCs)||Math.abs(value-apiCs)<=15);
-      const value=[zoomCs[i],latestCs[i]].find(valid);
-      if (value===undefined) continue;
-      csCells[side][i]={value,at:now};
-      if (state.draft[side+'Picks']?.[i]) state.draft[side+'Picks'][i].cs=value;
+      const id=rows[i]?.id;
+      const gold=data?.[side]?.[i];
+      if (Number.isFinite(gold)&&gold>=0&&gold<100000) {
+        const cell={value:gold,at:now};
+        goldCells[side][i]=cell;
+        if (id) goldByChampion[side].set(id,cell);
+      }
+      if (!id) continue;
+      seen.add(id);
+      const previous=csCells[side].get(id);
+      const elapsed=(lastLiveSeconds??0)-(previous?.seconds??0);
+      const result=selectScreenCs(zoom[i],raw[i],previous?.value,rows[i].player.scores?.creepScore,pendingCs[side].get(id),elapsed);
+      if (result.pending===null) pendingCs[side].delete(id);
+      else pendingCs[side].set(id,result.pending);
+      if (result.value===null) continue;
+      if(previous?.value!==result.value) csCells[side].set(id,{value:result.value,seconds:lastLiveSeconds??0});
+      const pick=lineup.find(p=>p.id===id);
+      if (pick) pick.cs=result.value;
     }
+    for(const id of pendingCs[side].keys()) if(!seen.has(id)) pendingCs[side].delete(id);
   }
   const blue=goldCells.blue.map(cell=>cell&&now-cell.at<4000?cell.value:null);
   const red=goldCells.red.map(cell=>cell&&now-cell.at<4000?cell.value:null);
@@ -143,9 +201,16 @@ function applyGoldOcr(data) {
   }
   state.game.blueGold=goldText(blueValues.reduce((a,b)=>a+b,0));
   state.game.redGold=goldText(redValues.reduce((a,b)=>a+b,0));
-  state.game.laneGoldDiffs=Array.from({length:5},(_,i)=>Number.isFinite(blue[i])&&Number.isFinite(red[i])?blue[i]-red[i]:0);
+  const laneGold=side=>(state.game.lineups?.[side]||[]).map(p=>{
+    const cell=goldByChampion[side].get(p.id);
+    return cell&&now-cell.at<4000?cell.value:null;
+  });
+  const blueLane=laneGold('blue'),redLane=laneGold('red');
+  if (blueLane.length&&redLane.length) state.game.laneGoldDiffs=ROLES.map((_,i)=>
+    Number.isFinite(blueLane[i])&&Number.isFinite(redLane[i])?blueLane[i]-redLane[i]:0);
   state.game.goldOcrStatus=`화면 골드 자동 인식 · 블루 ${blueValues.length}명 · 레드 ${redValues.length}명`;
-  recordGoldHistory(blueValues.reduce((a,b)=>a+b,0),redValues.reduce((a,b)=>a+b,0));
+  if(state.game.liveFeed?.status==='live')
+    recordGoldHistory(blueValues.reduce((a,b)=>a+b,0),redValues.reduce((a,b)=>a+b,0));
   broadcast();
 }
 function startGoldOcr() {
@@ -153,9 +218,32 @@ function startGoldOcr() {
   const helper=path.join(ROOT,'tools','gold-ocr.ps1');
   if (!fs.existsSync(helper)) return;
   const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',helper,'-ParentPid',String(process.pid)],{windowsHide:true,stdio:['ignore','pipe','ignore']});
+  let retryScheduled=false;
+  const retry=()=>{
+    if(retryScheduled)return;
+    retryScheduled=true;
+    if(state.game.screenGoldOcr) state.game.goldOcrStatus='화면 인식 프로그램 재연결 중';
+    if(state.game.autoQuestIcons) state.game.questIconStatus='화면 인식 프로그램 재연결 중';
+    broadcast();
+    setTimeout(startGoldOcr,3000).unref();
+  };
+  child.once('error',retry);
+  child.once('exit',retry);
   child.stdout.setEncoding('utf8');
   let pending='';
-  child.stdout.on('data',chunk=>{pending+=chunk;const lines=pending.split(/\r?\n/);pending=lines.pop()||'';for(const line of lines){try{const data=JSON.parse(line);applyQuestIconSamples(data);applyGoldOcr(data)}catch(_){}}});
+  child.stdout.on('data',chunk=>{
+    pending+=chunk;
+    const lines=pending.split(/\r?\n/);
+    pending=lines.pop()||'';
+    for(const line of lines) {
+      try {
+        const data=JSON.parse(line);
+        if(Number.isFinite(data.capturedAt)&&data.capturedAt<ocrResetAt) continue;
+        applyQuestIconSamples(data);
+        applyGoldOcr(data);
+      } catch(_) {}
+    }
+  });
 }
 const merge = (target, patch) => {
   for (const [key, value] of Object.entries(patch || {})) {
@@ -316,47 +404,140 @@ const spellKey=spell=>{
   const key=String(spell?.rawDisplayName||'').match(/SummonerSpell_([^_]+)_DisplayName/i)?.[1]||'';
   return key.startsWith('SummonerFlashPerksHextechFlashtraption')?'SummonerFlash':key;
 };
+function updateLiveLineups(teams, championId) {
+  const lineups={};
+  const sidePanelRoster={};
+  for (const side of ['blue','red']) {
+    livePlayers[side]=teams[side].slice(0,5).map(player=>({id:championId(player),player}));
+    const ordered=assignLineup(livePlayers[side],observedRoles[side]);
+    const roleById=new Map(ordered.filter(entry=>entry?.id).map(entry=>[entry.id,entry.role]));
+    sidePanelRoster[side]=livePlayers[side].map(({id})=>({id,role:roleById.get(id)}));
+    const roleState={...(state.game[side+'RoleQuests']||{})};
+    const detected=autoQuestDetected[side];
+    const moved=[];
+    for (const [id,oldRole] of Object.entries(detected)) {
+      const role=roleById.get(Number(id));
+      if (role&&role!==oldRole) {
+        moved.push({oldRole,role,completed:Boolean(roleState[oldRole])});
+        detected[id]=role;
+      }
+    }
+    for (const {oldRole} of moved) roleState[oldRole]=false;
+    for (const {role,completed} of moved) if(completed) roleState[role]=true;
+    lineups[side]=ordered.map((entry,index)=>{
+      if (!entry) return {id:0,role:ROLES[index]};
+      const {id,player,role,questCompleted}=entry;
+      const signal=roleQuestSignal(player)??questCompleted;
+      if(!(role in roleState)) roleState[role]=false;
+      if(signal!==null&&!detected[id]) roleState[role]=signal;
+      return {
+        id,role,name:player.championName||'CHAMPION',skinId:Number(player.skinID||player.skinId||0),
+        level:Number(player.level||0),
+        kda:{kills:Number(player.scores?.kills||0),deaths:Number(player.scores?.deaths||0),assists:Number(player.scores?.assists||0)},
+        cs:latestScreenCs(side,id),
+        items:(player.items||[]).map((item,index)=>({
+          id:Number(item.itemID||item.itemId||0),
+          slot:item.slot!==undefined&&Number.isInteger(Number(item.slot))?Number(item.slot):index,
+          count:Number(item.count||1),name:item.displayName||''
+        })),
+        spells:Object.values(player.summonerSpells||{}).slice(0,2).map(spell=>({key:spellKey(spell),name:spell.displayName||''})),
+        keystone:{id:Number(player.runes?.keystone?.id||0),name:player.runes?.keystone?.displayName||''},
+        isDead:Boolean(player.isDead),respawnTimer:Math.max(0,Math.ceil(Number(player.respawnTimer)||0)),
+        ultLearned:Number(player.level||0)>=6
+      };
+    });
+    state.game[side+'RoleQuests']=roleState;
+    state.game[side+'Kills']=teams[side].reduce((n,p)=>n+Number(p.scores?.kills||0),0);
+  }
+  state.game.lineups=lineups;
+  state.game.sidePanelRoster=sidePanelRoster;
+}
+
+function updateLiveFeed(status) {
+  const previous=state.game.liveFeed;
+  if (status==='live'||status==='ended') {
+    const now=Date.now();
+    if (previous?.status!==status||now-previous.lastAt>=2000) {
+      state.game.liveFeed={status,lastAt:now,clock:state.game.clock};
+    }
+    state.connection.status=status==='ended'?'경기 종료 · 마지막 통계 유지':'인게임·리플레이 데이터 자동 연결됨';
+    return;
+  }
+  if (status==='waiting'&&previous?.lastAt) {
+    if (previous.status==='ended'||previous.status==='idle') return;
+    if (previous.status==='live'&&Date.now()-previous.lastAt<5000) return;
+    state.game.liveFeed={...previous,status:'stale',clock:state.game.clock};
+    state.connection.status='인게임·리플레이 데이터 연결 끊김 · 마지막 통계 유지';
+    return;
+  }
+  if (previous?.status!==status) state.game.liveFeed={status};
+}
+
+function clearMatchObjectives() {
+  for (const kind of ['Grubs','Barons','Heralds']) {
+    state.game['manual'+kind]=false;
+    state.game['blue'+kind]=0;
+    state.game['red'+kind]=0;
+  }
+  for (const side of ['blue','red']) {
+    state.game[side+'RoleQuests']=Object.fromEntries(ROLES.map(role=>[role,false]));
+    state.game[side+'DragonTypes']=[];
+    state.game[side+'Dragons']=0;
+    state.game[side+'Gold']='—';
+  }
+  delete state.game.resultDragons;
+  delete state.game.manualDragonKillAt;
+  delete state.game.manualBaronKillAt;
+}
+
 async function syncLiveGame(webRoom=null) {
   try {
     const live=await liveRequest();
     if (webRoom!==null&&(!state.webDraft?.enabled||state.webDraft.room!==webRoom||state.webDraft.status!=='complete')) return false;
     if (webRoom===null&&state.webDraft?.enabled) return false;
     if (webRoom===null) state.draft.activeBanSlots={blue:-1,red:-1};
-    const seconds=Math.max(0,Math.floor(live.gameData?.gameTime||0));
-    if (lastLiveSeconds!==null&&seconds<lastLiveSeconds-10) { clearGoldOcr(); state.game.goldHistory=[];if(state.game.autoQuestIcons){for(const side of ['blue','red'])for(const role of Object.keys(autoQuestDetected[side]))if(state.game[side+'RoleQuests'])state.game[side+'RoleQuests'][role]=false;resetQuestIconBaseline()} }
-    lastLiveSeconds=seconds;
-    state.game.clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+    if (!Number.isFinite(live.gameData?.gameTime)) return false;
+    const seconds=Math.max(0,Math.floor(live.gameData.gameTime));
     const teams={blue:(live.allPlayers||[]).filter(p=>p.team==='ORDER'),red:(live.allPlayers||[]).filter(p=>p.team==='CHAOS')};
     const championId=p=>Number(p.championId||0)||championLookup.get(String(p.rawChampionName||'').replace(/^game_character_displayname_/i,'').replace(/^character_/i,'').replace(/_name$/i,'').toLowerCase())||championLookup.get(String(p.championName||'').toLowerCase())||0;
-    if(webRoom===null&&teams.blue.length===5&&teams.red.length===5&&clientFearless.capture(state,[...teams.blue,...teams.red].map(championId)))save();
-    for (const side of ['blue','red']) {
-      if (!teams[side].length) continue;
-      const existing=state.draft[side+'Picks']||[];
-      const ordered=webRoom===null?teams[side]:existing.map(p=>teams[side].find(player=>championId(player)===Number(p.id))||null);
-      ordered.slice(0,5).forEach((p,i)=>{if(p)apiCsCells[side][i]=Number(p.scores?.creepScore||0)});
-      // Broadcast player names are manual settings; never overwrite them with account nicknames.
-      state.draft[side+'Picks']=ordered.map((p,index)=>p?({
-        ...(webRoom!==null?existing[index]:{}),
-        id:championId(p),
-        skinId:webRoom!==null?(existing[index].skinId||0):Number(p.skinID||p.skinId||0), name:webRoom!==null?existing[index].name:(p.championName||'CHAMPION'), level:Number(p.level||0),
-        kda:{kills:Number(p.scores?.kills||0),deaths:Number(p.scores?.deaths||0),assists:Number(p.scores?.assists||0)},
-        cs:latestScreenCs(side,index)??0, items:(p.items||[]).map((item,slot)=>({id:Number(item.itemID||item.itemId||0),slot:item.slot!==undefined&&Number.isInteger(Number(item.slot))?Number(item.slot):slot,count:Number(item.count||1),name:item.displayName||''})),
-        spells:Object.values(p.summonerSpells||{}).slice(0,2).map(spell=>({key:spellKey(spell),name:spell.displayName||''})),
-        keystone:{id:Number(p.runes?.keystone?.id||0),name:p.runes?.keystone?.displayName||''},
-        isDead:Boolean(p.isDead),respawnTimer:Math.max(0,Math.ceil(Number(p.respawnTimer)||0)),ultLearned:Number(p.level||0)>=6
-      }):existing[index]).slice(0,5);
-      state.game[side+'Kills']=teams[side].reduce((n,p)=>n+Number(p.scores?.kills||0),0);
-      const roleMap={TOP:'top',JUNGLE:'jungle',MIDDLE:'mid',BOTTOM:'bot',UTILITY:'support',SUPPORT:'support'};
-      const fallback=['top','jungle','mid','bot','support'];
-      const roleState={...(state.game[side+'RoleQuests']||{})};
-      teams[side].slice(0,5).forEach((p,i)=>{
-        const role=roleMap[String(p.position||'').toUpperCase()]||fallback[i];
-        const signal=roleQuestSignal(p);
-        if (!(role in roleState)) roleState[role]=false;
-        if (signal!==null&&!autoQuestDetected[side][role]) roleState[role]=signal;
-      });
-      state.game[side+'RoleQuests']=roleState;
+    if (!teams.blue.length&&!teams.red.length) return false;
+    const ids=['blue','red'].map(side=>teams[side].map(championId).sort((a,b)=>a-b));
+    const roster=ids.every(team=>team.length===5&&team.every(Boolean)&&new Set(team).size===5)
+      ? JSON.stringify(ids) : null;
+    const apiId=live.gameData.gameId?String(live.gameData.gameId):null;
+    const previous=state.liveMatch;
+    const compareIds=Boolean(apiId&&previous?.apiId);
+    const changedRoom=Boolean(webRoom&&previous?.room&&webRoom!==previous.room);
+    const startsAgain=Boolean(previous&&(changedRoom||previous.awaitingGame)&&seconds<90&&previous.seconds>seconds+45);
+    const newGame=compareIds?apiId!==previous.apiId:Boolean(
+      (roster&&previous?.roster&&roster!==previous.roster)||startsAgain);
+    // Wait through incomplete packets and do not attach a previous match to the next draft room.
+    if ((previous?.roster&&!roster||changedRoom||previous?.awaitingGame)&&!newGame) return false;
+    if (newGame||lastLiveSeconds!==null&&seconds<lastLiveSeconds-2) {
+      clearGoldOcr();
+      state.game.goldHistory=[];
+      for (const side of ['blue','red']) for (const role of Object.values(autoQuestDetected[side])) {
+        if (state.game[side+'RoleQuests']) state.game[side+'RoleQuests'][role]=false;
+      }
+      resetQuestIconBaseline();
+      if (newGame) {
+        observedRoles={blue:new Map(),red:new Map()};
+        clearMatchObjectives();
+      }
     }
+    const matchBoundary=!previous||newGame;
+    if (matchBoundary) state.game.matchSerial=(Number(state.game.matchSerial)||0)+1;
+    state.liveMatch={
+      apiId:apiId||(newGame?null:previous?.apiId),
+      roster:roster||(newGame?null:previous?.roster),
+      room:webRoom,
+      seconds
+    };
+    lastLiveSeconds=seconds;
+    state.game.clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+    updateLiveLineups(teams,championId);
+    const recordedDraft=webRoom===null&&teams.blue.length===5&&teams.red.length===5&&
+      clientFearless.capture(state,[...teams.blue,...teams.red].map(championId));
     const playerSide=new Map();
     for (const side of ['blue','red']) for (const p of teams[side]) {
       for (const value of [p.summonerName,p.riotId,p.riotIdGameName]) {
@@ -366,7 +547,7 @@ async function syncLiveGame(webRoom=null) {
     }
     const events=live.events?.Events||[];
     const counts={blueTowers:0,redTowers:0,blueDragons:0,redDragons:0,blueBarons:0,redBarons:0,blueGrubs:0,redGrubs:0,blueHeralds:0,redHeralds:0};
-    const allDragonTypes=[],epicKills={blue:0,red:0};
+    const allDragonTypes=[],resultDragons={blue:[],red:[]},epicKills={blue:0,red:0};
     let firstBloodSide=null,firstTowerSide=null,epicFeatSide=null;
     let lastDragon=null,lastBaron=null;
     const eventSide=e=>{
@@ -399,7 +580,10 @@ async function syncLiveGame(webRoom=null) {
       const side=eventSide(e); if (!side) continue;
       if ((e.EventName==='ChampionKill'||e.EventName==='FirstBlood'||e.EventName==='FirstBloodKill')&&!firstBloodSide) firstBloodSide=side;
       if (e.EventName==='TurretKilled') { counts[side+'Towers']++; if (!firstTowerSide) firstTowerSide=side; }
-      if (e.EventName==='DragonKill') counts[side+'Dragons']++;
+      if (e.EventName==='DragonKill') {
+        counts[side+'Dragons']++;
+        if (e.DragonType) resultDragons[side].push(String(e.DragonType));
+      }
       if (e.EventName==='BaronKill') counts[side+'Barons']++;
       if (e.EventName==='HordeKill') counts[side+'Grubs']++;
       if (e.EventName==='HeraldKill') counts[side+'Heralds']++;
@@ -417,6 +601,8 @@ async function syncLiveGame(webRoom=null) {
       if (Number.isInteger(screenGrubCounts[side])) counts[side+'Grubs']=screenGrubCounts[side];
     }
     Object.assign(state.game,counts);
+    if(allDragonTypes.length) state.game.resultDragons=resultDragons;
+    else if(previous?.seconds>seconds+2) delete state.game.resultDragons;
     if (!state.game.manualNextDragon) {
       state.game.nextDragonType=(state.game.blueDragons>=4||state.game.redDragons>=4)?'Elder':(allDragonTypes[2]||'');
     }
@@ -429,7 +615,8 @@ async function syncLiveGame(webRoom=null) {
     const recentKill=(...times)=>times.filter(t=>Number.isFinite(t)&&t<=seconds+1).reduce((a,b)=>Math.max(a,b),-Infinity);
     state.game.dragonRespawn=respawnLeft(recentKill(storedTime(lastDragon?.EventTime),storedTime(state.game.manualDragonKillAt)),300,dragonDelay);
     state.game.baronRespawn=respawnLeft(recentKill(storedTime(lastBaron?.EventTime),storedTime(state.game.manualBaronKillAt)),1200,360);
-    state.connection.status='인게임·리플레이 데이터 자동 연결됨';
+    updateLiveFeed(events.some(e=>e.EventName==='GameEnd'&&Number(e.EventTime)<=seconds+1)?'ended':'live');
+    if (matchBoundary||recordedDraft) save();
     return true;
   } catch(e) {
     return false;
@@ -441,12 +628,25 @@ async function syncLeague() {
   leagueSyncBusy=true;
   try {
     if (state.webDraft?.enabled) {
-      if (state.webDraft.status==='complete') await syncLiveGame(state.webDraft.room);
-      broadcast();
+      if (state.webDraft.status==='complete') {
+        if(!await syncLiveGame(state.webDraft.room)) {
+          state.connection.status='웹 밴픽 완료 · 인게임/리플레이 대기 중';
+          updateLiveFeed('waiting');
+        }
+      } else {
+        state.connection.status='웹 밴픽 모드';
+        updateLiveFeed('idle');
+      }
       return;
     }
     lcu = loadCredentials();
-    if (!lcu) throw new Error('롤 클라이언트를 찾지 못했습니다');
+    if (!lcu) {
+      if(!await syncLiveGame()){
+        state.connection.status='롤 클라이언트를 찾지 못했습니다';
+        updateLiveFeed('waiting');
+      }
+      return;
+    }
     const phase = await lcuRequest('/lol-gameflow/v1/gameflow-phase');
     state.connection.phase = phase;
     if (!championMap.size) {
@@ -463,20 +663,35 @@ async function syncLeague() {
       let currentChampion = 0;
       try { currentChampion = Number(await lcuRequest('/lol-champ-select/v1/current-champion')) || 0; } catch (_) {}
       applyChampSelect(session,currentChampion);
+      updateLiveFeed('idle');
       state.connection.status = `롤 밴픽 자동 연결됨 · ${phase}`;
     } else {
       const liveConnected=await syncLiveGame();
-      if (!liveConnected) state.connection.status = `롤 연결됨 · ${phase} · 인게임/리플레이 대기 중`;
+      if (!liveConnected) {
+        state.connection.status = `롤 연결됨 · ${phase} · 인게임/리플레이 대기 중`;
+        updateLiveFeed('waiting');
+      }
     }
   } catch (e) {
     state.connection.status = e.status === 404 ? '관전자 밴픽 데이터 없음 · 수동 조작 가능' : e.message;
+    updateLiveFeed('waiting');
   } finally {
     leagueSyncBusy=false;
+    broadcast();
   }
-  broadcast();
 }
 function applyChampSelect(session,currentChampion=0) {
   if(state.webDraft?.enabled)return;
+  if(state.game.lineups){
+    delete state.game.lineups;
+    delete state.game.sidePanelRoster;
+    if(state.liveMatch) state.liveMatch.awaitingGame=true;
+    lastLiveSeconds=null;
+    livePlayers={blue:[],red:[]};
+    observedRoles={blue:new Map(),red:new Map()};
+    clearGoldOcr();
+    resetQuestIconBaseline();
+  }
   const mine = new Set((session.myTeam || []).map(x => x.cellId));
   const theirs = new Set((session.theirTeam || []).map(x => x.cellId));
   const picks = { blue:[], red:[] }, bans = { blue:[], red:[] };
@@ -555,9 +770,28 @@ function analyzeGoldGraph(imagePath,options={}) {
 }
 const server = http.createServer(async (req,res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
-  if(u.pathname==='/api/public-hud/status'&&req.method==='GET'){if(!localRequest(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});const info=externalHud.get();if(!info.running&&externalHudGateway.status().running)await externalHudGateway.stop();return json(res,200,info)}
-  if(u.pathname==='/api/public-hud/start'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});try{await externalHudGateway.start();return json(res,200,externalHud.begin())}catch(e){await externalHudGateway.stop();return json(res,500,{error:e.message})}}
-  if(u.pathname==='/api/public-hud/stop'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});externalHud.end();await externalHudGateway.stop();return json(res,200,{ok:true})}
+  if(u.pathname==='/api/public-hud/status'&&req.method==='GET'){
+    if(!localRequest(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});
+    return json(res,200,await externalHudStatus());
+  }
+  if(['/api/public-hud/start','/api/public-hud/stop'].includes(u.pathname)&&req.method==='POST'){
+    if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});
+    if(externalHudAction)return json(res,409,{error:'외부 HUD 연결을 처리 중입니다.'});
+    externalHudAction=u.pathname.endsWith('/start')?'start':'stop';
+    try{
+      if(externalHudAction==='start'){
+        await ensureExternalGateway();
+        return json(res,200,externalHud.begin());
+      }
+      externalHud.end();
+      if(externalGatewayStart)await externalGatewayStart.catch(()=>{});
+      await externalHudGateway.stop();
+      return json(res,200,{ok:true});
+    }catch(e){
+      if(!externalHud.get().running)await externalHudGateway.stop();
+      return json(res,500,{error:e.message});
+    }finally{externalHudAction=null;}
+  }
   if(u.pathname==='/api/lan-hud/status'&&req.method==='GET'){if(!localRequest(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});return json(res,200,lanHud.status())}
   if(u.pathname==='/api/lan-hud/start'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});try{return json(res,200,await lanHud.start())}catch(e){return json(res,500,{error:'내부 HUD 시작 실패: '+e.message})}}
   if(u.pathname==='/api/lan-hud/stop'&&req.method==='POST'){if(!localRequest(req)||!sameOrigin(req))return json(res,403,{error:'관전 PC에서만 사용할 수 있습니다.'});return json(res,200,await lanHud.stop())}
@@ -574,26 +808,70 @@ const server = http.createServer(async (req,res) => {
   if(u.pathname==='/api/web-draft/public-start'&&req.method==='POST'){
     try{return json(res,200,publicConnection.begin())}catch(error){return json(res,400,{error:error.message})}
   }
+  if(u.pathname==='/api/web-draft/links'&&req.method==='GET'){
+    if(!localRequest(req)) return json(res,403,{error:'로컬 진행자 전용입니다.'});
+    return json(res,200,draftLinks());
+  }
   if(u.pathname==='/api/web-draft/admin'&&req.method==='POST'){
-    try{const body=await readBody(req);if(['create','series-create','next-set','undo-set'].includes(body.action)){
-      await initDataDragon();
-      if(body.action==='create'){if(state.fearless?.active&&!state.fearless.complete)throw Error('시리즈 진행 중입니다. 다음 세트 버튼을 사용하세요.');delete state.fearless;webDraft.create(body.seconds)}
-      else if(body.action==='series-create')webDraft.startSeries(body);
-      else if(body.action==='next-set')webDraft.nextSet(body);
-      else webDraft.undoSet();
-      if(body.action!=='next-set'||!state.fearless?.complete){webAccess={blue:crypto.randomBytes(24).toString('hex'),red:crypto.randomBytes(24).toString('hex')};fs.writeFileSync(ACCESS_FILE,JSON.stringify(webAccess));}
-    }else if(body.action!=='links')webDraft.admin(body.action);
-    save();broadcast();return json(res,200,{ok:true,links:Object.fromEntries(['blue','red'].map(side=>[side,`/draft.html?team=${side}#${webAccess[side]||''}`])),room:state.webDraft?.room});
+    try{const body=await readBody(req);
+      if(['create','series-create'].includes(body.action))await initDataDragon();
+      if(body.room!==undefined&&body.room!==state.webDraft?.room) throw Error('밴픽 상태가 바뀌었습니다. 현재 세트를 확인하세요.');
+      const previousRoom=state.webDraft?.room;
+      if(body.action==='create'){
+        if(state.fearless?.active&&!state.fearless.complete)throw Error('시리즈 진행 중입니다. 다음 세트 버튼을 사용하세요.');
+        delete state.fearless;webDraft.create(body.seconds);
+      }else if(body.action==='series-create')webDraft.startSeries(body);
+      else if(body.action==='next-set'){
+        const currentResult=ResultCore.isCurrent(state);
+        webDraft.nextSet(body);
+        if(currentResult)state.result.winner=body.winner;
+      }else if(body.action==='undo-set'){
+        const restoredRoom=state.fearless?.undo?.webDraft?.room;
+        webDraft.undoSet();
+        if(restoredRoom&&state.liveMatch?.room===restoredRoom)state.liveMatch.room=state.webDraft.room;
+      }else if(body.action==='links')return json(res,200,draftLinks());
+      else webDraft.admin(body.action);
+      if(previousRoom!==state.webDraft?.room){
+        webAccess={blue:crypto.randomBytes(24).toString('hex'),red:crypto.randomBytes(24).toString('hex')};
+        fs.writeFileSync(ACCESS_FILE,JSON.stringify(webAccess));
+      }
+      save();broadcast();return json(res,200,draftLinks());
     }catch(e){return json(res,400,{error:e.message})}
   }
   if(u.pathname==='/api/web-draft/action'&&req.method==='POST'){
-    try{const side=teamFor(req);if(!side)return json(res,403,{error:'팀 접속 링크가 잘못됐거나 만료됐습니다.'});webDraft.command(side,await readBody(req));save();broadcast();return json(res,200,{ok:true});}catch(e){return json(res,409,{error:e.message})}
+    try{
+      const body=await readBody(req),side=teamFor(req);
+      if(!side)return json(res,403,{error:'팀 접속 링크가 잘못됐거나 만료됐습니다.'});
+      const outcome=webDraft.command(side,body);
+      save();broadcast();return json(res,200,{ok:true,...outcome});
+    }catch(e){return json(res,409,{error:e.message})}
   }
   if (u.pathname === '/api/client-fearless/reset' && req.method === 'POST') {clientFearless.reset(state);save();broadcast();return json(res,200,{ok:true});}
   if (u.pathname === '/api/teams/swap' && req.method === 'POST') {try{swapTeamSides();save();broadcast();return json(res,200,{ok:true})}catch(error){return json(res,409,{ok:false,error:error.message})}}
   if (u.pathname === '/api/state' && req.method === 'GET') return json(res,200,{...state,serverNow:Date.now()});
   if (u.pathname === '/api/state' && req.method === 'POST') {
-    try { const patch=await readBody(req);if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});if(typeof patch.game?.autoQuestIcons==='boolean'&&patch.game.autoQuestIcons!==Boolean(state.game.autoQuestIcons))resetQuestIconBaseline();delete patch.webDraft;merge(state,patch);normalizeSideColors();save(); broadcast(); return json(res,200,{ok:true,state}); }
+    try {
+      const patch=await readBody(req);
+      if(state.webDraft?.enabled&&patch.draft)return json(res,409,{error:'웹 밴픽 진행 중에는 밴픽 수동 조작을 사용할 수 없습니다.'});
+      if(patch.result&&patch.resultGuard&&!ResultCore.sameTarget(state,patch.resultGuard)){
+        return json(res,409,{ok:false,error:'세트나 저장 결과가 바뀌었습니다. 현재 세트의 결과를 확인하세요.'});
+      }
+      if(typeof patch.game?.autoQuestIcons==='boolean'&&patch.game.autoQuestIcons!==Boolean(state.game.autoQuestIcons))resetQuestIconBaseline();
+      if(patch.result?.snapshot?.savedAt&&patch.result.snapshot.savedAt!==state.result?.snapshot?.savedAt){
+        const issue=ResultCore.captureIssue(state);
+        if(issue)return json(res,409,{ok:false,error:issue});
+        if(patch.result.snapshot.matchKey&&patch.result.snapshot.matchKey!==ResultCore.matchKey(state)){
+          return json(res,409,{ok:false,error:'현재 세트가 바뀌었습니다. 경기 결과를 다시 저장하세요.'});
+        }
+        state.result={};
+      }
+      delete patch.resultGuard;
+      delete patch.webDraft;
+      delete patch.liveMatch;
+      merge(state,patch);
+      if(patch.connection?.autoSync===false)updateLiveFeed('idle');
+      normalizeSideColors();save();broadcast();return json(res,200,{ok:true,state});
+    }
     catch(e) { return json(res,400,{ok:false,error:e.message}); }
   }
   if (u.pathname === '/api/events') {
@@ -603,6 +881,8 @@ const server = http.createServer(async (req,res) => {
   if (u.pathname === '/api/result-image' && req.method === 'POST') {
     try {
       const body=await readBody(req),match=String(body.dataUrl||'').match(/^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/);
+      if(body.preview!==true&&!ResultCore.isCurrent(state))throw Error('현재 세트 결과를 먼저 저장하세요.');
+      const target=ResultCore.target(state);
       if (!match) return json(res,400,{ok:false,error:'JPG 이미지 형식이 올바르지 않습니다.'});
       const image=Buffer.from(match[2],'base64');
       const valid=match[1]==='png'?image.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):image[0]===255&&image[1]===216&&image[2]===255;
@@ -612,24 +892,30 @@ const server = http.createServer(async (req,res) => {
       fs.writeFileSync(path.join(directory,filename),image);
       if(body.graphType==='gold'){
         const data=await analyzeGoldGraph(path.join(directory,filename),{durationSeconds:body.durationSeconds});
-        if(body.preview!==true){state.result=state.result||{};state.result.goldData=data;state.result.goldImage='/uploads/'+filename;save();broadcast()}
+        if(body.preview!==true){
+          if(!ResultCore.sameTarget(state,target))throw Error('분석 중 세트 또는 결과가 바뀌었습니다.');
+          state.result.goldData=data;state.result.goldImage='/uploads/'+filename;save();broadcast();
+        }
         return json(res,200,{ok:true,url:'/uploads/'+filename,data});
       }
       if(body.preview===true){
         try{const data=await analyzeResultGraph(path.join(directory,filename));return json(res,200,{ok:true,url:'/uploads/'+filename,data,analysisError:data.warning||''})}
         catch(e){return json(res,400,{ok:false,error:e.message})}
       }
-      state.result=state.result||{};state.result.damageImage='/uploads/'+filename;
-      state.result.damageData=null;state.result.damageAnalysisError='';
-      try{state.result.damageData=await analyzeResultGraph(path.join(directory,filename));state.result.damageAnalysisError=state.result.damageData.warning||''}catch(e){state.result.damageAnalysisError=e.message}
-      save();broadcast();return json(res,200,{ok:true,url:state.result.damageImage,analysisError:state.result.damageAnalysisError,data:state.result.damageData});
+      const data=await analyzeResultGraph(path.join(directory,filename));
+      if(!ResultCore.sameTarget(state,target))throw Error('분석 중 세트 또는 결과가 바뀌었습니다.');
+      Object.assign(state.result,{damageImage:'/uploads/'+filename,damageData:data,damageAnalysisError:data.warning||''});
+      save();broadcast();return json(res,200,{ok:true,url:state.result.damageImage,analysisError:state.result.damageAnalysisError,data});
     } catch(e) { return json(res,400,{ok:false,error:e.message}); }
   }
   if(u.pathname==='/api/result-analyze'&&req.method==='POST'){
     try{
+      if(!ResultCore.isCurrent(state))throw Error('현재 세트 결과를 먼저 저장하세요.');
+      const target=ResultCore.target(state);
       const imageUrl=state.result?.damageImage||'';
       if(!/^\/uploads\/result-damage-[a-zA-Z0-9-]+\.(jpg|png)$/.test(imageUrl))throw Error('저장된 딜량 이미지가 없습니다.');
       const data=await analyzeResultGraph(path.join(PUBLIC,imageUrl.slice(1)));
+      if(!ResultCore.sameTarget(state,target)||state.result.damageImage!==imageUrl)throw Error('분석 중 세트 또는 이미지가 바뀌었습니다.');
       state.result.damageData=data;state.result.damageAnalysisError=data.warning||'';save();broadcast();
       return json(res,200,{ok:true,data,analysisError:data.warning||''});
     }catch(e){return json(res,400,{ok:false,error:e.message})}
@@ -682,7 +968,13 @@ const server = http.createServer(async (req,res) => {
   if (!full.startsWith(PUBLIC) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) { res.writeHead(404); return res.end('Not found'); }
   res.writeHead(200,{'Content-Type':types[path.extname(full)]||'application/octet-stream','Cache-Control':'no-store'}); fs.createReadStream(full).pipe(res);
 });
-server.listen(PORT,process.env.HUD_HOST||'127.0.0.1',()=>console.log(`LOL Broadcast HUD: http://127.0.0.1:${PORT}`));
+server.listen(PORT,process.env.HUD_HOST||'127.0.0.1',()=>{
+  console.log(`LOL Broadcast HUD: http://127.0.0.1:${PORT}`);
+  if(externalHud.get().running)externalHudStatus().catch(error=>console.warn(error.message));
+});
+setInterval(()=>{
+  for(const res of clients)if(!res.destroyed&&!res.writableEnded&&!res.writableNeedDrain)res.write('event: heartbeat\ndata: {}\n\n');
+},2000).unref();
 setInterval(()=>{if(!state.webDraft?.enabled)return;const before=JSON.stringify(state.draft);webDraft.tick();if(before!==JSON.stringify(state.draft)){save();broadcast()}},250);
 startGoldOcr();
 initDataDragon().then(async()=>{console.log(`Data Dragon ${ddragonVersion}: ${championMap.size} champions cached`);const ready=await warmBaseSplashes();console.log(`Base splash cache ready: ${ready}/${championMap.size}`)}).catch(e=>console.log(`Data Dragon waiting: ${e.message}`));

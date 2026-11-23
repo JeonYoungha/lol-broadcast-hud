@@ -5,6 +5,7 @@ window.ResultControls=(()=>{
  card.querySelector('#resultImagePreview').nextElementSibling.textContent='경기 종료 후 통계를 저장하고 딜량 이미지를 선택하세요. 전체 스크린샷도 올릴 수 있습니다. 영역 지정 → 숫자 읽기 → 10명 확인 후 적용 순서로 진행하며, 적용 전에는 기존 결과창이 유지됩니다.';
  const reanalyze=document.createElement('button');reanalyze.className='btn';reanalyze.textContent='딜량 이미지 다시 읽기';card.querySelector('.actions').appendChild(reanalyze);
  reanalyze.onclick=async()=>{
+  if(!HUD.state||!ResultCore.isCurrent(HUD.state)){status('현재 세트 결과를 먼저 저장하세요.');return;}
   uploading=true;reanalyze.disabled=true;status('딜량 숫자를 다시 읽는 중…');
   try{const response=await fetch('/api/result-analyze',{method:'POST'}),result=await response.json();if(!result.ok)throw Error(result.error);status(result.analysisError||'딜량 10명 재인식 완료')}catch(e){status(e.message)}finally{uploading=false;reanalyze.disabled=false}
  };
@@ -34,9 +35,29 @@ window.ResultControls=(()=>{
  };
  byId('clearGoldGraph').onclick=async()=>{try{await update({result:{goldData:null,goldImage:''}});byId('goldGraphStatus').textContent='업로드 골드 그래프를 지웠어요.'}catch(e){status(e.message)}};
  function status(text,keep=true){byId('resultStatus').textContent=text;if(keep)noticeUntil=Date.now()+5000}
- async function update(patch){const response=await HUD.update(patch);if(!response.ok)throw Error(response.error||'결과 저장 실패');return response}
- byId('resultWinner').onchange=async()=>{try{await update({result:{winner:byId('resultWinner').value}})}catch(e){status(e.message)}};
- byId('captureResult').onclick=async()=>{try{const snapshot=ResultCore.snapshot(HUD.state);snapshot.seriesScorePending=!HUD.state.fearless?.games?.some(game=>Number(game.game)===Number(snapshot.event.game));await update({result:{snapshot,winner:byId('resultWinner').value,damageImage:'',damageData:null,goldData:null,goldImage:''}});status('현재 경기 통계를 저장했어요. 딜량과 골드 차이 이미지를 올려주세요.')}catch(e){status(e.message)}};
+ async function update(patch,{capture=false}={}){
+  const state=HUD.state;
+  if(!state)throw Error('HUD 서버 연결을 확인하세요.');
+  if(!capture&&!ResultCore.isCurrent(state))throw Error('현재 세트 결과를 먼저 저장하세요.');
+  const response=await HUD.update({...patch,resultGuard:ResultCore.target(state)});
+  if(!response.ok)throw Error(response.error||'결과 저장 실패');
+  return response;
+ }
+ byId('resultWinner').onchange=async()=>{
+  if(!HUD.state||!ResultCore.isCurrent(HUD.state))return;
+  try{await update({result:{winner:byId('resultWinner').value}})}catch(e){status(e.message)}
+ };
+ byId('captureResult').onclick=async()=>{
+  const state=HUD.state,button=byId('captureResult');
+  if(!state||button.disabled)return;
+  button.disabled=true;
+  try{
+   const snapshot=ResultCore.snapshot(state);
+   snapshot.seriesScorePending=!state.fearless?.games?.some(game=>Number(game.game)===Number(snapshot.event.game));
+   await update({result:{snapshot,winner:byId('resultWinner').value,damageImage:'',damageData:null,goldData:null,goldImage:''}},{capture:true});
+   status('현재 경기 통계를 저장했어요. 딜량과 골드 차이 이미지를 올려주세요.');
+  }catch(e){status(e.message)}finally{button.disabled=false;}
+ };
  byId('removeResultImage').onclick=async()=>{try{await update({result:{damageImage:'',damageData:null}})}catch(e){status(e.message)}};
  byId('damageEditRows').addEventListener('change',async event=>{
   const input=event.target,side=input.dataset.side,index=Number(input.dataset.index),key=input.dataset.key;if(!side||!key)return;
@@ -50,7 +71,7 @@ window.ResultControls=(()=>{
    const key=event.target.dataset.resultField;if(!key)return;
    const snapshot=HUD.state.result?.snapshot?structuredClone(HUD.state.result.snapshot):ResultCore.snapshot(HUD.state);
    snapshot.game[key]=event.target.type==='number'?Math.max(0,Number(event.target.value)||0):event.target.value;
-   try{await update({result:{snapshot}})}catch(e){status(e.message)}
+   try{await update({result:{snapshot}},{capture:!HUD.state.result?.snapshot})}catch(e){status(e.message)}
  });
  function imageData(file){return new Promise((resolve,reject)=>{
    const source=URL.createObjectURL(file),image=new Image();
@@ -62,6 +83,7 @@ window.ResultControls=(()=>{
    if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>25*1024*1024){status('PNG/JPG/WebP 이미지(25MB 이하)를 선택해주세요.');return}
    try{await ResultCapture.open(file,{champions,onApply:status})}catch(e){status(e.message)}finally{byId('resultDamageFile').value=''}
  };
+ let winnerTarget='';
  function render(s){
    if(!s)return;
    const result=s.result||{},snapshot=result.snapshot||ResultCore.snapshot(s);
@@ -81,10 +103,16 @@ window.ResultControls=(()=>{
     }).join('')).join(''):'<p class="hint">딜량 이미지를 올리면 보정 항목이 나타납니다.</p>';
     editor.querySelectorAll('select[data-side]').forEach(select=>select.value=String(result.damageData[select.dataset.side][Number(select.dataset.index)].id));
    }
-   if(document.activeElement!==byId('resultWinner'))byId('resultWinner').value=result.winner||'';
+   const key=ResultCore.matchKey(s);
+   const current=ResultCore.isCurrent(s);
+   if(winnerTarget!==key){winnerTarget=key;byId('resultWinner').value=current?(result.winner||''):'';}
+   else if(current&&document.activeElement!==byId('resultWinner'))byId('resultWinner').value=result.winner||'';
    const preview=byId('resultImagePreview');preview.style.display=result.damageImage?'block':'none';if(result.damageImage&&preview.getAttribute('src')!==result.damageImage)preview.src=result.damageImage;
    for(const [key] of fields){const input=card.querySelector('[data-result-field="'+key+'"]');if(document.activeElement!==input)input.value=key==='blueKda'?ResultCore.kda(snapshot,'blue'):key==='redKda'?ResultCore.kda(snapshot,'red'):(snapshot.game[key]??'')}
-   if(!uploading&&Date.now()>noticeUntil)status(result.snapshot?'저장된 결과: '+(s.event?.name ?? snapshot.event.name)+' · GAME '+(s.event?.game ?? snapshot.event.game)+' · '+snapshot.game.clock+(result.damageImage?' · 딜량 이미지 적용됨':' · 딜량 이미지 대기'):'아직 결과가 저장되지 않았어요. 경기 종료 후 현재 경기 결과 저장을 눌러주세요.',false);
+   if(!uploading&&Date.now()>noticeUntil){
+    const saved=result.snapshot?`저장된 결과 · GAME ${snapshot.event.game} · ${snapshot.game.clock}`:'경기 종료 후 현재 경기 결과를 저장하세요.';
+    status(result.snapshot&&!current?saved+' · 새 세트 결과는 따로 저장하세요.':saved,false);
+   }
  }
  return {render};
 })();

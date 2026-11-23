@@ -42,10 +42,16 @@ let signature='';
 function renderResult(s){
  if(!s)return;
  const result=s.result||{},snapshot=result.snapshot||ResultCore.snapshot(s);
- const currentEvent={...snapshot.event,...s.event};
+ const currentEvent={...s.event,...snapshot.event,name:s.event?.name??snapshot.event?.name,logo:s.event?.logo??snapshot.event?.logo};
  const sig=JSON.stringify({result,previewSnapshot:result.snapshot?undefined:snapshot,currentEvent,currentTeams:{blue:s.blue,red:s.red},legacySeries:result.snapshot?.seriesScorePending===undefined?{active:s.fearless?.active,games:s.fearless?.games?.map(game=>game.game)}:undefined});if(sig===signature)return;signature=sig;
- const g=snapshot.game,winner=result.winner||'',pending=result.snapshot&&(snapshot.seriesScorePending??(s.fearless?.active&&Number(snapshot.event?.game)===Number(s.event?.game)&&!s.fearless.games?.some(game=>Number(game.game)===Number(snapshot.event?.game)))),blueKda=ResultCore.kda(snapshot,'blue'),redKda=ResultCore.kda(snapshot,'red'),blueDrakes=(g.blueDragonTypes||[]).filter(t=>dragon(t)!=='elder'),redDrakes=(g.redDragonTypes||[]).filter(t=>dragon(t)!=='elder'),blueElders=Math.max(0,Math.min(10,Number(g.blueElders??(g.blueDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0)),redElders=Math.max(0,Math.min(10,Number(g.redElders??(g.redDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0));
- root.innerHTML='<header class="result-header">'+team(snapshot,'blue',winner,s,pending)+'<div class="result-time"><small>GAME TIME</small><b>'+esc(g.clock||'00:00')+'</b></div>'+team(snapshot,'red',winner,s,pending)+'</header><div class="result-columns"><section class="result-left"><h2 class="result-title">GAME STATS</h2>'+ 
+ const g=snapshot.game,winner=result.winner||'',
+  pending=result.snapshot&&(snapshot.seriesScorePending??(s.fearless?.active&&
+    Number(snapshot.event?.game)===Number(s.event?.game)&&!s.fearless.games?.some(game=>Number(game.game)===Number(snapshot.event?.game)))),
+  blueKda=ResultCore.kda(snapshot,'blue'),redKda=ResultCore.kda(snapshot,'red'),
+  blueDrakes=(g.blueDragonTypes||[]).filter(t=>dragon(t)!=='elder'),redDrakes=(g.redDragonTypes||[]).filter(t=>dragon(t)!=='elder'),
+  blueElders=Math.max(0,Math.min(10,Number(g.blueElders??(g.blueDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0)),
+  redElders=Math.max(0,Math.min(10,Number(g.redElders??(g.redDragonTypes||[]).filter(t=>dragon(t)==='elder').length)||0));
+ root.innerHTML='<header class="result-header">'+team(snapshot,'blue',winner,s,pending)+'<div class="result-time"><small>GAME TIME</small><b>'+esc(g.clock||'00:00')+'</b></div>'+team(snapshot,'red',winner,s,pending)+'</header><div class="result-columns"><section class="result-left"><h2 class="result-title">GAME STATS</h2>'+
  row('K / D / A',esc(blueKda),esc(redKda),kdaValue(blueKda),kdaValue(redKda))+
  row('GOLD',esc(g.blueGold||'—'),esc(g.redGold||'—'),goldValue(g.blueGold),goldValue(g.redGold))+
  row('TOWERS',esc(g.blueTowers??0),esc(g.redTowers??0),countValue(g.blueTowers),countValue(g.redTowers))+

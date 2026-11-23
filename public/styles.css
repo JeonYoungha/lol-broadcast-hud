@@ -32,7 +32,7 @@
 .ingame .mini-champ{width:34px;height:34px;border-radius:3px;border:1px solid #46516a}.player-cell{min-width:0}.ingame .roster-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.champ-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#69758a;font-size:8px;margin-top:2px}.item-list{display:flex;gap:3px;align-items:center;min-width:0}.red .item-list{justify-content:flex-end}.item-slot{position:relative;width:25px;height:25px;flex:0 0 25px;border-radius:2px;overflow:hidden;background:#141c2a;border:1px solid #303b51}.item-slot img{width:100%;height:100%;object-fit:cover}.item-slot b{position:absolute;right:1px;bottom:0;font-size:7px;line-height:9px;text-shadow:0 1px 2px #000}.item-slot.empty{opacity:.45}.ingame .kda{font-size:10px;color:#dbe2ef;font-weight:800;text-align:center}.cs{font-size:10px;color:#bbc5d6;text-align:center}.cs small{font-size:7px;color:#68758b}.level{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#1b2434;border:1px solid #46516a;color:#f1c96d;font-size:9px;font-weight:900}
 
 /* Reference layout: flush to bottom, champion nearest the center */
-.ingame .bottom-hud{left:440px;right:440px;bottom:0;height:238px;border-radius:7px 7px 0 0;border-bottom:0}
+.ingame .bottom-hud{left:440px;right:440px;bottom:0;height:238px;border-radius:7px 7px 0 0;border-bottom:0;transform:translate(var(--bottom-x,0px),var(--bottom-y,0px))}
 .ingame .roster-table,.ingame .roster-col{height:202px}.ingame .roster-row.blue{grid-template-columns:minmax(170px,1fr) 64px 48px 38px;text-align:right}.ingame .roster-row.red{grid-template-columns:38px 48px 64px minmax(170px,1fr);text-align:left}.champ-cell{display:grid;place-items:center}.ingame .mini-champ{width:35px;height:35px}.ingame .roster-row.blue .item-list{justify-content:flex-end}.ingame .roster-row.red .item-list{justify-content:flex-start}.ingame .cs{display:flex;flex-direction:column;align-items:center;line-height:1}.ingame .cs b{font-size:11px;color:#e8edf7}.ingame .cs small{margin-top:3px;font-size:7px;color:#657189}.ingame .kda{font-size:11px}
 
 /* Compact esports scoreboard */
@@ -99,6 +99,12 @@
 }
 .match-main{background:linear-gradient(180deg,#10151e,#070b11);border-bottom-color:rgba(126,141,162,.38)}
 .match-sub{background:#080c13}
+.hud-warning{position:absolute;z-index:22;top:100px;left:960px;transform:translateX(-50%);margin:0;padding:6px 12px;border:1px solid #9b6144;border-radius:4px;background:#241813;color:#ffe1ba;font-size:13px;font-weight:800;pointer-events:none;white-space:nowrap}
+.hud-transport-warning,.disconnected .hud-live-warning{display:none}
+.disconnected .hud-transport-warning{display:block}
+.status .hud-offline-text{display:none}
+.disconnected .status .hud-offline-text{display:inline}
+.disconnected .status #connectionStatus{display:none}
 .match-hud.native-dragon-stacks .dragon-stack{display:none}
 .dragon-window-fields{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin:12px 0 16px}
 .dragon-window-settings{margin-bottom:16px}

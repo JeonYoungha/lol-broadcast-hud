@@ -11,20 +11,34 @@ using System.Runtime.InteropServices;
 public static class HudWindow {
   public delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
-  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  public static void UsePhysicalPixels() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch (EntryPointNotFoundException) {}
+    SetProcessDPIAware();
+  }
   public static bool IsForeground(int processId) { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid == processId; }
   public static bool TryFind(int processId, out RECT best) {
     RECT selected = new RECT(); bool found = false; long bestArea = 0;
     EnumWindows((hwnd, param) => {
       uint pid; GetWindowThreadProcessId(hwnd, out pid);
-      if (pid != processId || !IsWindowVisible(hwnd)) return true;
-      RECT rect; if (!GetWindowRect(hwnd, out rect)) return true;
-      long width = rect.Right - rect.Left, height = rect.Bottom - rect.Top, area = width * height;
-      if (width >= 1280 && height >= 720 && area > bestArea) { selected = rect; bestArea = area; found = true; }
+      if (pid != processId || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+      RECT rect; if (!GetClientRect(hwnd, out rect)) return true;
+      int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+      long area = (long)width * height;
+      POINT start = new POINT();
+      if (width >= 1280 && height >= 720 && area > bestArea && ClientToScreen(hwnd, ref start)) {
+        selected = new RECT { Left = start.X, Top = start.Y, Right = start.X + width, Bottom = start.Y + height };
+        bestArea = area; found = true;
+      }
       return true;
     }, IntPtr.Zero);
     best = selected;
@@ -32,6 +46,7 @@ public static class HudWindow {
   }
 }
 '@
+[HudWindow]::UsePhysicalPixels()
 $null = [Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation,ContentType=WindowsRuntime]
 $null = [Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
@@ -64,23 +79,26 @@ $csCapturePath = Join-Path $env:TEMP "lol-hud-cs-$ParentPid.png"
 $digitCapturePath = Join-Path $env:TEMP "lol-hud-digits-$ParentPid.png"
 try {
   while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+    $bitmap=$null; $csBitmap=$null; $digitBitmap=$null
     try {
-      $screenBounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
-      $gameBounds = $screenBounds
       $game = Get-Process -Name 'League of Legends' -ErrorAction SilentlyContinue | Select-Object -First 1
       if (-not $game) {
         [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='no-game';questIconCapture='no-game'} | ConvertTo-Json -Compress))
         Start-Sleep -Milliseconds 1000
         continue
       }
-      if ($game) {
-        $rect = New-Object HudWindow+RECT
-        if ([HudWindow]::TryFind($game.Id,[ref]$rect)) {
-          $gameBounds = New-Object Drawing.Rectangle $rect.Left,$rect.Top,($rect.Right-$rect.Left),($rect.Bottom-$rect.Top)
-        }
+      $rect = New-Object HudWindow+RECT
+      if (-not [HudWindow]::TryFind($game.Id,[ref]$rect)) {
+        [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='no-window';questIconCapture='not-visible'} | ConvertTo-Json -Compress))
+        Start-Sleep -Milliseconds 1000
+        continue
       }
-      if ($gameBounds.Width -eq $screenBounds.Width -and $screenBounds.Width -ge 1920 -and $screenBounds.Height -ge 1080) {
-        $gameBounds = New-Object Drawing.Rectangle ([math]::Round(($screenBounds.Width-1920)/2)),([math]::Round(($screenBounds.Height-1080)/2)),1920,1080
+      $gameBounds = [Drawing.Rectangle]::new($rect.Left,$rect.Top,($rect.Right-$rect.Left),($rect.Bottom-$rect.Top))
+      $monitor = [Windows.Forms.Screen]::FromRectangle($gameBounds)
+      if (-not $monitor.Bounds.Contains($gameBounds)) {
+        [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='off-screen';questIconCapture='not-visible'} | ConvertTo-Json -Compress))
+        Start-Sleep -Milliseconds 1000
+        continue
       }
       $aspect=$gameBounds.Width/[double]$gameBounds.Height
       if ([math]::Abs($aspect-(16/9)) -gt 0.03) {
@@ -89,9 +107,11 @@ try {
         continue
       }
       $scaleX=$gameBounds.Width/1920.0; $scaleY=$gameBounds.Height/1080.0
-      $bitmap = New-Object Drawing.Bitmap $screenBounds.Width,$screenBounds.Height
+      $capturedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      $bitmap = New-Object Drawing.Bitmap $gameBounds.Width,$gameBounds.Height
       $graphics = [Drawing.Graphics]::FromImage($bitmap)
-      try { $graphics.CopyFromScreen($screenBounds.Location,[Drawing.Point]::Empty,$screenBounds.Size) } finally { $graphics.Dispose() }
+      try { $graphics.CopyFromScreen($gameBounds.Location,[Drawing.Point]::Empty,$gameBounds.Size) } finally { $graphics.Dispose() }
+      $gameBounds = [Drawing.Rectangle]::new(0,0,$bitmap.Width,$bitmap.Height)
       $bitmap.Save($capturePath,[Drawing.Imaging.ImageFormat]::Png)
       $cropLeft=[int][math]::Round($gameBounds.Left+860*$scaleX)
       $cropTop=[int][math]::Round($gameBounds.Top+850*$scaleY)
@@ -104,7 +124,7 @@ try {
         $csGraphics.DrawImage($bitmap,[Drawing.Rectangle]::new(0,0,660,675),[Drawing.Rectangle]::new($cropLeft,$cropTop,$cropWidth,$cropHeight),[Drawing.GraphicsUnit]::Pixel)
       } finally { $csGraphics.Dispose() }
       $csBitmap.Save($csCapturePath,[Drawing.Imaging.ImageFormat]::Png)
-      $csBitmap.Dispose()
+      $csBitmap.Dispose(); $csBitmap=$null
       $digitBitmap=New-Object Drawing.Bitmap 350,180
       $digitGraphics=[Drawing.Graphics]::FromImage($digitBitmap)
       try { $digitGraphics.Clear([Drawing.Color]::Black) } finally { $digitGraphics.Dispose() }
@@ -122,7 +142,7 @@ try {
         }
       }
       $digitBitmap.Save($digitCapturePath,[Drawing.Imaging.ImageFormat]::Png)
-      $digitBitmap.Dispose()
+      $digitBitmap.Dispose(); $digitBitmap=$null
       $questIcons=@{blue=@();red=@()}
       $visibleBars=0
       if($game -and -not [HudWindow]::IsForeground($game.Id)){
@@ -150,22 +170,27 @@ try {
           }
         }
       }
-      $bitmap.Dispose()
+      $bitmap.Dispose(); $bitmap=$null
       $blue = @($null,$null,$null,$null,$null)
       $red = @($null,$null,$null,$null,$null)
       $blueCs = @($null,$null,$null,$null,$null)
       $redCs = @($null,$null,$null,$null,$null)
       $blueCsZoom = @($null,$null,$null,$null,$null)
       $redCsZoom = @($null,$null,$null,$null,$null)
+      $blueKda = @($null,$null,$null,$null,$null)
+      $redKda = @($null,$null,$null,$null,$null)
       $blueGrubs=$null; $redGrubs=$null
       $blueParts=@{}; $redParts=@{}
       $blueCsParts=@{}; $redCsParts=@{}
+      $blueKdaParts=@{}; $redKdaParts=@{}
       $blueCsZoomParts=@{}; $redCsZoomParts=@{}
       0..4 | ForEach-Object {
         $blueParts[$_]=New-Object System.Collections.ArrayList
         $redParts[$_]=New-Object System.Collections.ArrayList
         $blueCsParts[$_]=New-Object System.Collections.ArrayList
         $redCsParts[$_]=New-Object System.Collections.ArrayList
+        $blueKdaParts[$_]=New-Object System.Collections.ArrayList
+        $redKdaParts[$_]=New-Object System.Collections.ArrayList
         $blueCsZoomParts[$_]=New-Object System.Collections.ArrayList
         $redCsZoomParts[$_]=New-Object System.Collections.ArrayList
       }
@@ -181,6 +206,8 @@ try {
         elseif ($x -ge 1140 -and $x -le 1280) { [void]$redParts[$row].Add($part) }
         if ($x -ge 860 -and $x -le 930) { [void]$blueCsParts[$row].Add($part) }
         elseif ($x -ge 1000 -and $x -le 1070) { [void]$redCsParts[$row].Add($part) }
+        if ($x -ge 790 -and $x -lt 860) { [void]$blueKdaParts[$row].Add($part) }
+        elseif ($x -ge 1050 -and $x -lt 1138) { [void]$redKdaParts[$row].Add($part) }
       }
       $digitWords=Read-OcrWords $digitCapturePath $engine
       $digitText=(($digitWords | Sort-Object {$_.BoundingRect.X} | ForEach-Object {$_.Text}) -join '') -replace '\s',''
@@ -209,6 +236,10 @@ try {
         if ($redText[$row] -match '^(\d+)[\(\[]([0-9]+)[\)\]]$') { $red[$row]=[int]$Matches[2] }
         $blueCsText[$row]=(($blueCsParts[$row] | Sort-Object x | ForEach-Object {$_.text}) -join '')
         $redCsText[$row]=(($redCsParts[$row] | Sort-Object x | ForEach-Object {$_.text}) -join '')
+        $blueKdaText=(($blueKdaParts[$row] | Sort-Object x | ForEach-Object {$_.text}) -join '')
+        $redKdaText=(($redKdaParts[$row] | Sort-Object x | ForEach-Object {$_.text}) -join '')
+        if ($blueKdaText -match '(?<![0-9/])(\d{1,2})/(\d{1,2})/(\d{1,2})(?![0-9/])') { $blueKda[$row]=[string]::Format('{0}/{1}/{2}',[int]$Matches[1],[int]$Matches[2],[int]$Matches[3]) }
+        if ($redKdaText -match '(?<![0-9/])(\d{1,2})/(\d{1,2})/(\d{1,2})(?![0-9/])') { $redKda[$row]=[string]::Format('{0}/{1}/{2}',[int]$Matches[1],[int]$Matches[2],[int]$Matches[3]) }
         $blueCandidate=$blueCsParts[$row] | Where-Object {$_.text -match '^(\d{1,4})(?:\D|$)'} | Sort-Object @{Expression={[math]::Abs($_.x-885)}} | Select-Object -First 1
         $redCandidate=$redCsParts[$row] | Where-Object {$_.text -match '^(\d{1,4})(?:\D|$)'} | Sort-Object @{Expression={[math]::Abs($_.x-1025)}} | Select-Object -First 1
         $blueZoomCandidate=$blueCsZoomParts[$row] | Where-Object {$_.text -match '^(\d{1,4})(?:\D|$)'} | Sort-Object @{Expression={[math]::Abs($_.x-885)}} | Select-Object -First 1
@@ -220,9 +251,13 @@ try {
       }
       $blueCount=@($blue | Where-Object { $null -ne $_ }).Count
       $redCount=@($red | Where-Object { $null -ne $_ }).Count
-      [Console]::Out.WriteLine(([pscustomobject]@{ok=($blueCount -gt 0 -and $redCount -gt 0);width=$gameBounds.Width;height=$gameBounds.Height;blue=$blue;red=$red;blueCs=$blueCs;redCs=$redCs;blueCsZoom=$blueCsZoom;redCsZoom=$redCsZoom;blueGrubs=$blueGrubs;redGrubs=$redGrubs;blueCsText=$blueCsText;redCsText=$redCsText;blueText=$blueText;redText=$redText;blueCount=$blueCount;redCount=$redCount;questIcons=$questIcons;questIconCapture=$questIconCapture} | ConvertTo-Json -Compress -Depth 4))
+      [Console]::Out.WriteLine(([pscustomobject]@{ok=($blueCount -gt 0 -and $redCount -gt 0);capturedAt=$capturedAt;width=$gameBounds.Width;height=$gameBounds.Height;blue=$blue;red=$red;blueCs=$blueCs;redCs=$redCs;blueCsZoom=$blueCsZoom;redCsZoom=$redCsZoom;blueKda=$blueKda;redKda=$redKda;blueGrubs=$blueGrubs;redGrubs=$redGrubs;blueCsText=$blueCsText;redCsText=$redCsText;blueText=$blueText;redText=$redText;blueCount=$blueCount;redCount=$redCount;questIcons=$questIcons;questIconCapture=$questIconCapture} | ConvertTo-Json -Compress -Depth 4))
     } catch {
       [Console]::Out.WriteLine(([pscustomobject]@{ok=$false;reason='ocr';message=$_.Exception.Message;trace=$_.ScriptStackTrace} | ConvertTo-Json -Compress))
+    } finally {
+      if($bitmap){$bitmap.Dispose()}
+      if($csBitmap){$csBitmap.Dispose()}
+      if($digitBitmap){$digitBitmap.Dispose()}
     }
     Start-Sleep -Milliseconds 700
   }
